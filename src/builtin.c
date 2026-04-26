@@ -43,8 +43,7 @@ static int builtin_echo(char **argv, int argc) {
     int i;
     for (i = 1; i < argc; i++) {
         write(STDOUT_FILENO, argv[i], strlen(argv[i]));
-        if (i < argc - 1)
-            write(STDOUT_FILENO, " ", 1);
+        if (i < argc - 1) write(STDOUT_FILENO, " ", 1);
     }
     write(STDOUT_FILENO, "\n", 1);
     return 0;
@@ -61,21 +60,17 @@ static int builtin_export(char **argv, int argc) {
         return 0;
     }
     for (i = 1; i < argc; i++) {
-        char *arg = argv[i];
-        char *eq = arg;
-        char name[64];
-        int nlen;
+        char *arg = argv[i], *eq = arg;
+        char name[64]; int nlen;
         while (*eq && *eq != '=') eq++;
         nlen = (int)(eq - arg);
         if (*eq == '=') {
             if (nlen < 64) {
-                memcpy(name, arg, nlen);
-                name[nlen] = '\0';
+                memcpy(name, arg, nlen); name[nlen] = '\0';
                 env_set(name, eq + 1);
             }
         } else {
-            if (!env_get(arg))
-                env_set(arg, "");
+            if (!env_get(arg)) env_set(arg, "");
         }
     }
     return 0;
@@ -83,8 +78,7 @@ static int builtin_export(char **argv, int argc) {
 
 static int builtin_unset(char **argv, int argc) {
     int i;
-    for (i = 1; i < argc; i++)
-        env_unset(argv[i]);
+    for (i = 1; i < argc; i++) env_unset(argv[i]);
     return 0;
 }
 
@@ -98,14 +92,28 @@ static int builtin_env(char **argv, int argc) {
     return 0;
 }
 
-static int builtin_true(char **argv, int argc) {
+static int builtin_jobs(char **argv, int argc) {
     (void)argv; (void)argc;
+    shell_list_jobs();
     return 0;
 }
 
+static int builtin_fg(char **argv, int argc) {
+    int n = (argc >= 2) ? atoi(argv[1]) : 1;
+    return shell_fg_job(n);
+}
+
+static int builtin_bg(char **argv, int argc) {
+    int n = (argc >= 2) ? atoi(argv[1]) : 1;
+    return shell_bg_job(n);
+}
+
+static int builtin_true(char **argv, int argc) {
+    (void)argv; (void)argc; return 0;
+}
+
 static int builtin_false(char **argv, int argc) {
-    (void)argv; (void)argc;
-    return 1;
+    (void)argv; (void)argc; return 1;
 }
 
 static int builtin_version(char **argv, int argc) {
@@ -125,6 +133,9 @@ static int builtin_help(char **argv, int argc) {
         "  export [VAR[=v]]  set/list environment variables\n"
         "  unset VAR...      remove environment variables\n"
         "  env               print all environment variables\n"
+        "  jobs              list background jobs\n"
+        "  fg [n]            bring job n to foreground\n"
+        "  bg [n]            resume job n in background\n"
         "  true              exit 0\n"
         "  false             exit 1\n"
         "  exit [code]       exit the shell\n"
@@ -142,6 +153,9 @@ static const struct builtin_cmd builtins[] = {
     {"export",  builtin_export},
     {"unset",   builtin_unset},
     {"env",     builtin_env},
+    {"jobs",    builtin_jobs},
+    {"fg",      builtin_fg},
+    {"bg",      builtin_bg},
     {"true",    builtin_true},
     {"false",   builtin_false},
     {"version", builtin_version},
@@ -151,8 +165,7 @@ static const struct builtin_cmd builtins[] = {
 
 int builtin_run(char **argv, int argc) {
     int i;
-    if (argc == 0 || argv[0] == NULL)
-        return -1;
+    if (argc == 0 || argv[0] == NULL) return -1;
     for (i = 0; builtins[i].name != NULL; i++)
         if (strcmp(argv[0], (char *)builtins[i].name) == 0)
             return builtins[i].fn(argv, argc);
