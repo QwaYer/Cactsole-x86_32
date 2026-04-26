@@ -7,10 +7,17 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <stat.h>
 
 #define MAX_ARGS     64
 #define MAX_PIPELINE  8
 #define LINE_MAX    1024
+#define ENV_MAX      256
+
+char **shell_env;
+
+static char *env_buf[ENV_MAX + 1];
+static int   env_cnt;
 
 typedef struct {
     char *argv[MAX_ARGS];
@@ -24,8 +31,73 @@ static int is_space(char c) {
     return c == ' ' || c == '\t';
 }
 
-/* Tokenise one pipeline stage in-place by writing NUL bytes into `s`.
-   Returns pointer to start of next stage (past '|'), or end of string. */
+static int starts_with_n(const char *s, const char *p, int n) {
+    int i;
+    for (i = 0; i < n; i++)
+        if (s[i] != p[i]) return 0;
+    return 1;
+}
+
+char *env_get(const char *name) {
+    int i, nlen = strlen((char *)name);
+    for (i = 0; i < env_cnt; i++)
+        if (starts_with_n(env_buf[i], name, nlen) && env_buf[i][nlen] == '=')
+            return env_buf[i] + nlen + 1;
+    return NULL;
+}
+
+static void env_init(char **envp) {
+    env_cnt = 0;
+    if (envp) {
+        int i;
+        for (i = 0; envp[i] && env_cnt < ENV_MAX; i++) {
+            int len = strlen(envp[i]);
+            char *e = malloc(len + 1);
+            if (!e) break;
+            memcpy(e, envp[i], len + 1);
+            env_buf[env_cnt++] = e;
+        }
+    }
+    env_buf[env_cnt] = NULL;
+    shell_env = env_buf;
+}
+
+static int path_find_exec(const char *cmd, char *out, int outsz) {
+    const char *p = cmd;
+    struct stat st;
+    int i;
+
+    while (*p) { if (*p == '/') goto use_direct; p++; }
+
+    {
+        const char *path = env_get("PATH");
+        if (!path) path = "/bin:/usr/bin";
+        int cmdlen = strlen((char *)cmd);
+        const char *seg = path;
+        while (*seg) {
+            const char *end = seg;
+            while (*end && *end != ':') end++;
+            int dlen = (int)(end - seg);
+            if (dlen + 1 + cmdlen < outsz) {
+                for (i = 0; i < dlen; i++) out[i] = seg[i];
+                out[dlen] = '/';
+                memcpy(out + dlen + 1, cmd, cmdlen + 1);
+                if (stat(out, &st) == 0)
+                    return 0;
+            }
+            if (!*end) break;
+            seg = end + 1;
+        }
+    }
+
+use_direct:
+    i = strlen((char *)cmd);
+    if (i >= outsz) i = outsz - 1;
+    memcpy(out, cmd, i);
+    out[i] = '\0';
+    return -1;
+}
+
 static char *tokenise_cmd(char *s, Cmd *cmd) {
     char *p = s;
     memset(cmd, 0, sizeof(*cmd));
@@ -43,10 +115,8 @@ static char *tokenise_cmd(char *s, Cmd *cmd) {
             while (*p && !is_space(*p) && *p != '|' && *p != '>' && *p != '<')
                 p++;
             if (*p) { *p = '\0'; p++; }
-            if (append)
-                cmd->redir_app = start;
-            else
-                cmd->redir_out = start;
+            if (append) cmd->redir_app = start;
+            else        cmd->redir_out = start;
             continue;
         }
 
@@ -61,7 +131,6 @@ static char *tokenise_cmd(char *s, Cmd *cmd) {
             continue;
         }
 
-        /* Normal word */
         char *start = p;
         while (*p && !is_space(*p) && *p != '|' && *p != '>' && *p != '<')
             p++;
@@ -127,6 +196,16 @@ static void apply_redirections(Cmd *cmd) {
     }
 }
 
+static void exec_external(char **argv) {
+    char path[512];
+    path_find_exec(argv[0], path, sizeof(path));
+    execve(path, argv, shell_env);
+    write(STDERR_FILENO, "cactsole: ", 10);
+    write(STDERR_FILENO, argv[0], strlen(argv[0]));
+    write(STDERR_FILENO, ": not found\n", 12);
+    exit(127);
+}
+
 static void exec_pipeline(Cmd *cmds, int n) {
     int i;
     if (n == 0) return;
@@ -138,11 +217,7 @@ static void exec_pipeline(Cmd *cmds, int n) {
         pid_t pid = fork();
         if (pid == 0) {
             apply_redirections(&cmds[0]);
-            execve(cmds[0].argv[0], cmds[0].argv, NULL);
-            write(STDERR_FILENO, "cactsole: ", 10);
-            write(STDERR_FILENO, cmds[0].argv[0], strlen(cmds[0].argv[0]));
-            write(STDERR_FILENO, ": not found\n", 12);
-            exit(127);
+            exec_external(cmds[0].argv);
         }
         fg_pid = pid;
         int status;
@@ -160,24 +235,18 @@ static void exec_pipeline(Cmd *cmds, int n) {
         pids[i] = fork();
         if (pids[i] == 0) {
             int j;
-            if (i > 0)
-                dup2(pipes[i - 1][0], STDIN_FILENO);
-            if (i < n - 1)
-                dup2(pipes[i][1], STDOUT_FILENO);
-            for (j = 0; j < n - 1; j++) {
+            if (i > 0)   dup2(pipes[i-1][0], STDIN_FILENO);
+            if (i < n-1) dup2(pipes[i][1],   STDOUT_FILENO);
+            for (j = 0; j < n-1; j++) {
                 close(pipes[j][0]);
                 close(pipes[j][1]);
             }
             apply_redirections(&cmds[i]);
-            execve(cmds[i].argv[0], cmds[i].argv, NULL);
-            write(STDERR_FILENO, "cactsole: ", 10);
-            write(STDERR_FILENO, cmds[i].argv[0], strlen(cmds[i].argv[0]));
-            write(STDERR_FILENO, ": not found\n", 12);
-            exit(127);
+            exec_external(cmds[i].argv);
         }
     }
 
-    for (i = 0; i < n - 1; i++) {
+    for (i = 0; i < n-1; i++) {
         close(pipes[i][0]);
         close(pipes[i][1]);
     }
@@ -187,9 +256,11 @@ static void exec_pipeline(Cmd *cmds, int n) {
     }
 }
 
-void shell_run(void) {
+void shell_run(char **envp) {
     char line[LINE_MAX];
     char cwd[256];
+
+    env_init(envp);
 
     signal(SIGINT,  sigint_handler);
     signal(SIGCHLD, sigchld_handler);
@@ -208,13 +279,11 @@ void shell_run(void) {
             write(STDOUT_FILENO, "exit\n", 5);
             break;
         }
-        if (n == 0)
-            continue;
+        if (n == 0) continue;
 
-        while (n > 0 && is_space(line[n - 1]))
+        while (n > 0 && is_space(line[n-1]))
             line[--n] = '\0';
-        if (n == 0)
-            continue;
+        if (n == 0) continue;
 
         readline_add_history(line);
 
