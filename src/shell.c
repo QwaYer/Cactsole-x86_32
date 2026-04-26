@@ -21,7 +21,6 @@ static char *env_buf[ENV_MAX + 1];
 static int   env_cnt;
 static int   last_exit;
 
-/* storage for expanded argument strings, reset each command line */
 static char word_pool[WORD_POOL_SZ][256];
 static int  word_pool_top;
 
@@ -50,6 +49,46 @@ char *env_get(const char *name) {
         if (starts_with_n(env_buf[i], name, nlen) && env_buf[i][nlen] == '=')
             return env_buf[i] + nlen + 1;
     return NULL;
+}
+
+void env_set(const char *name, const char *val) {
+    int i, nlen = strlen((char *)name), vlen = strlen((char *)val);
+    char *e;
+    for (i = 0; i < env_cnt; i++) {
+        if (starts_with_n(env_buf[i], name, nlen) && env_buf[i][nlen] == '=') {
+            e = malloc(nlen + 1 + vlen + 1);
+            if (!e) return;
+            memcpy(e, name, nlen);
+            e[nlen] = '=';
+            memcpy(e + nlen + 1, val, vlen + 1);
+            free(env_buf[i]);
+            env_buf[i] = e;
+            return;
+        }
+    }
+    if (env_cnt < ENV_MAX) {
+        e = malloc(nlen + 1 + vlen + 1);
+        if (!e) return;
+        memcpy(e, name, nlen);
+        e[nlen] = '=';
+        memcpy(e + nlen + 1, val, vlen + 1);
+        env_buf[env_cnt++] = e;
+        env_buf[env_cnt] = NULL;
+    }
+}
+
+void env_unset(const char *name) {
+    int i, j, nlen = strlen((char *)name);
+    for (i = 0; i < env_cnt; i++) {
+        if (starts_with_n(env_buf[i], name, nlen) && env_buf[i][nlen] == '=') {
+            free(env_buf[i]);
+            for (j = i; j < env_cnt - 1; j++)
+                env_buf[j] = env_buf[j + 1];
+            env_cnt--;
+            env_buf[env_cnt] = NULL;
+            return;
+        }
+    }
 }
 
 static void env_init(char **envp) {
@@ -104,8 +143,6 @@ use_direct:
     return -1;
 }
 
-/* Write the value of $... (p already past '$') into out[0..outsz-1].
- * Advances *pp past the variable reference. Returns chars written. */
 static int expand_dollar(char **pp, char *out, int outsz) {
     char *p = *pp;
     char vname[64];
@@ -148,9 +185,6 @@ static int expand_dollar(char **pp, char *out, int outsz) {
     return oi;
 }
 
-/* Collect one word from *pp into out[0..outsz-1], handling quoting and
- * variable expansion. Stops at unquoted whitespace or shell metachar.
- * Returns 1 if at least one character was produced. */
 static int collect_word(char **pp, char *out, int outsz) {
     char *p = *pp;
     int oi = 0, got = 0;
@@ -329,8 +363,9 @@ static void exec_pipeline(Cmd *cmds, int n) {
     if (n == 0) return;
 
     if (n == 1) {
-        if (builtin_run(cmds[0].argv, cmds[0].argc)) {
-            last_exit = 0;
+        int rc = builtin_run(cmds[0].argv, cmds[0].argc);
+        if (rc >= 0) {
+            last_exit = rc;
             return;
         }
 
@@ -379,6 +414,21 @@ static void exec_pipeline(Cmd *cmds, int n) {
     }
 }
 
+/* Return 1 if tok is a valid NAME=value assignment token. */
+static int is_assignment(const char *tok) {
+    int i = 0;
+    if (!tok || !*tok) return 0;
+    if (tok[0] >= '0' && tok[0] <= '9') return 0;
+    while (tok[i] && tok[i] != '=') {
+        char c = tok[i];
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+              (c >= '0' && c <= '9') || c == '_'))
+            return 0;
+        i++;
+    }
+    return tok[i] == '=';
+}
+
 void shell_run(char **envp) {
     char line[LINE_MAX];
     char cwd[256];
@@ -418,6 +468,21 @@ void shell_run(char **envp) {
             p = tokenise_cmd(p, &cmds[ncmds]);
             if (cmds[ncmds].argc > 0)
                 ncmds++;
+        }
+
+        /* Standalone VAR=value assignment */
+        if (ncmds == 1 && cmds[0].argc == 1 && is_assignment(cmds[0].argv[0])) {
+            char *tok = cmds[0].argv[0];
+            int eqpos = 0;
+            char name[64];
+            while (tok[eqpos] != '=') eqpos++;
+            if (eqpos < 64) {
+                memcpy(name, tok, eqpos);
+                name[eqpos] = '\0';
+                env_set(name, tok + eqpos + 1);
+            }
+            last_exit = 0;
+            continue;
         }
 
         if (ncmds > 0)
