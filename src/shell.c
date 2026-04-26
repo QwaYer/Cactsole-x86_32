@@ -15,6 +15,14 @@
 #define ENV_MAX      256
 #define WORD_POOL_SZ (MAX_PIPELINE * MAX_ARGS)
 
+/* Pipeline-stage separator codes */
+#define SEP_NONE  0
+#define SEP_PIPE  '|'
+#define SEP_SEMI  ';'
+#define SEP_AND   1   /* && */
+#define SEP_OR    2   /* || */
+#define SEP_BG    3   /* &  (background, handled in next commit) */
+
 char **shell_env;
 
 static char *env_buf[ENV_MAX + 1];
@@ -246,14 +254,23 @@ static char *next_word_buf(void) {
     return NULL;
 }
 
-static char *tokenise_cmd(char *s, Cmd *cmd) {
+/* Tokenise one pipeline stage from s into cmd; sets *sep to the
+ * delimiter that ended it (SEP_*). Returns pointer past the delimiter. */
+static char *tokenise_cmd(char *s, Cmd *cmd, int *sep) {
     char *p = s;
     char *buf;
     memset(cmd, 0, sizeof(*cmd));
+    *sep = SEP_NONE;
 
     while (1) {
         while (*p && is_space(*p)) p++;
-        if (!*p || *p == '|') break;
+
+        if (!*p)                         { *sep = SEP_NONE; break; }
+        if (*p == '|' && *(p+1) == '|') { *sep = SEP_OR;   p += 2; break; }
+        if (*p == '|')                  { *sep = SEP_PIPE;  p++;    break; }
+        if (*p == ';')                  { *sep = SEP_SEMI;  p++;    break; }
+        if (*p == '&' && *(p+1) == '&') { *sep = SEP_AND;   p += 2; break; }
+        if (*p == '&')                  { *sep = SEP_BG;    p++;    break; }
 
         if (*p == '>') {
             p++;
@@ -292,7 +309,6 @@ static char *tokenise_cmd(char *s, Cmd *cmd) {
     }
 
     cmd->argv[cmd->argc] = NULL;
-    if (*p == '|') p++;
     return p;
 }
 
@@ -414,7 +430,6 @@ static void exec_pipeline(Cmd *cmds, int n) {
     }
 }
 
-/* Return 1 if tok is a valid NAME=value assignment token. */
 static int is_assignment(const char *tok) {
     int i = 0;
     if (!tok || !*tok) return 0;
@@ -427,6 +442,50 @@ static int is_assignment(const char *tok) {
         i++;
     }
     return tok[i] == '=';
+}
+
+static void run_line(char *line) {
+    char *p = line;
+    int run = 1;
+
+    while (*p) {
+        Cmd cmds[MAX_PIPELINE];
+        int ncmds = 0, final_sep = SEP_NONE;
+
+        word_pool_top = 0;
+
+        while (ncmds < MAX_PIPELINE) {
+            int s;
+            p = tokenise_cmd(p, &cmds[ncmds], &s);
+            if (cmds[ncmds].argc > 0)
+                ncmds++;
+            if (s != SEP_PIPE) { final_sep = s; break; }
+        }
+
+        if (run && ncmds > 0) {
+            if (ncmds == 1 && cmds[0].argc == 1 &&
+                is_assignment(cmds[0].argv[0])) {
+                char *tok = cmds[0].argv[0];
+                int eqpos = 0;
+                char name[64];
+                while (tok[eqpos] != '=') eqpos++;
+                if (eqpos < 64) {
+                    memcpy(name, tok, eqpos);
+                    name[eqpos] = '\0';
+                    env_set(name, tok + eqpos + 1);
+                }
+                last_exit = 0;
+            } else {
+                exec_pipeline(cmds, ncmds);
+            }
+        }
+
+        if (final_sep == SEP_NONE) break;
+        if (final_sep == SEP_SEMI || final_sep == SEP_BG) run = 1;
+        else if (final_sep == SEP_AND) run = (last_exit == 0);
+        else if (final_sep == SEP_OR)  run = (last_exit != 0);
+        else break;
+    }
 }
 
 void shell_run(char **envp) {
@@ -459,34 +518,7 @@ void shell_run(char **envp) {
         if (n == 0) continue;
 
         readline_add_history(line);
-
-        Cmd  cmds[MAX_PIPELINE];
-        int  ncmds = 0;
-        char *p = line;
-        word_pool_top = 0;
-        while (*p && ncmds < MAX_PIPELINE) {
-            p = tokenise_cmd(p, &cmds[ncmds]);
-            if (cmds[ncmds].argc > 0)
-                ncmds++;
-        }
-
-        /* Standalone VAR=value assignment */
-        if (ncmds == 1 && cmds[0].argc == 1 && is_assignment(cmds[0].argv[0])) {
-            char *tok = cmds[0].argv[0];
-            int eqpos = 0;
-            char name[64];
-            while (tok[eqpos] != '=') eqpos++;
-            if (eqpos < 64) {
-                memcpy(name, tok, eqpos);
-                name[eqpos] = '\0';
-                env_set(name, tok + eqpos + 1);
-            }
-            last_exit = 0;
-            continue;
-        }
-
-        if (ncmds > 0)
-            exec_pipeline(cmds, ncmds);
+        run_line(line);
     }
 
     readline_cleanup();
