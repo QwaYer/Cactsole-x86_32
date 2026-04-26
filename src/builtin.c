@@ -1,4 +1,5 @@
 #include "builtin.h"
+#include "version.h"
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
@@ -41,29 +42,37 @@ static int builtin_echo(char **argv, int argc) {
     return 1;
 }
 
+static int builtin_version(char **argv, int argc) {
+    (void)argv; (void)argc;
+    static const char msg[] = "cactsole " CACTSOLE_VERSION "\n";
+    write(STDOUT_FILENO, msg, sizeof(msg) - 1);
+    return 1;
+}
+
 static int builtin_help(char **argv, int argc) {
     (void)argv; (void)argc;
     static const char msg[] =
-        "cactsole built-in commands:\n"
+        "cactsole built-out commands:\n"
         "  cd [dir]       change directory (default /)\n"
         "  pwd            print working directory\n"
         "  echo [args...] print arguments\n"
         "  exit [code]    exit the shell\n"
-        "  help           show this message\n";
+        "  help           show this message\n"
+        "  version        print shell version\n";
     write(STDOUT_FILENO, msg, sizeof(msg) - 1);
     return 1;
 }
 
 static const struct builtin_cmd builtins[] = {
-    {"cd",   builtin_cd},
-    {"pwd",  builtin_pwd},
-    {"exit", builtin_exit},
-    {"echo", builtin_echo},
-    {"help", builtin_help},
-    {NULL,   NULL}
+    {"cd",      builtin_cd},
+    {"pwd",     builtin_pwd},
+    {"exit",    builtin_exit},
+    {"echo",    builtin_echo},
+    {"version", builtin_version},
+    {"help",    builtin_help},
+    {NULL,      NULL}
 };
 
-/* Returns 1 if command was a builtin and was executed, 0 otherwise. */
 int builtin_run(char **argv, int argc) {
     if (argc == 0 || argv[0] == NULL)
         return 0;

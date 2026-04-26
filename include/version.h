@@ -1,0 +1,9 @@
+#ifndef VERSION_H
+#define VERSION_H
+
+#define CACTSOLE_VERSION        "1.0.0"
+#define CACTSOLE_VERSION_MAJOR  1
+#define CACTSOLE_VERSION_MINOR  0
+#define CACTSOLE_VERSION_PATCH  0
+
+#endif
