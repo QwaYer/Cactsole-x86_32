@@ -13,11 +13,17 @@
 #define MAX_PIPELINE  8
 #define LINE_MAX    1024
 #define ENV_MAX      256
+#define WORD_POOL_SZ (MAX_PIPELINE * MAX_ARGS)
 
 char **shell_env;
 
 static char *env_buf[ENV_MAX + 1];
 static int   env_cnt;
+static int   last_exit;
+
+/* storage for expanded argument strings, reset each command line */
+static char word_pool[WORD_POOL_SZ][256];
+static int  word_pool_top;
 
 typedef struct {
     char *argv[MAX_ARGS];
@@ -98,45 +104,157 @@ use_direct:
     return -1;
 }
 
+/* Write the value of $... (p already past '$') into out[0..outsz-1].
+ * Advances *pp past the variable reference. Returns chars written. */
+static int expand_dollar(char **pp, char *out, int outsz) {
+    char *p = *pp;
+    char vname[64];
+    int vi, oi = 0;
+    char *val;
+
+    if (*p == '?') {
+        char tmp[16];
+        itoa(last_exit, tmp);
+        while (tmp[oi] && oi < outsz - 1) { out[oi] = tmp[oi]; oi++; }
+        p++;
+    } else if (*p == '$') {
+        char tmp[16];
+        itoa((int)getpid(), tmp);
+        while (tmp[oi] && oi < outsz - 1) { out[oi] = tmp[oi]; oi++; }
+        p++;
+    } else if (*p == '{') {
+        p++;
+        vi = 0;
+        while (*p && *p != '}') { if (vi < 63) vname[vi++] = *p; p++; }
+        if (*p == '}') p++;
+        vname[vi] = '\0';
+        val = env_get(vname);
+        if (val) while (*val && oi < outsz - 1) out[oi++] = *val++;
+    } else if ((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') || *p == '_') {
+        vi = 0;
+        while ((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') ||
+               (*p >= '0' && *p <= '9') || *p == '_') {
+            if (vi < 63) vname[vi++] = *p;
+            p++;
+        }
+        vname[vi] = '\0';
+        val = env_get(vname);
+        if (val) while (*val && oi < outsz - 1) out[oi++] = *val++;
+    } else {
+        if (oi < outsz - 1) out[oi++] = '$';
+    }
+
+    *pp = p;
+    return oi;
+}
+
+/* Collect one word from *pp into out[0..outsz-1], handling quoting and
+ * variable expansion. Stops at unquoted whitespace or shell metachar.
+ * Returns 1 if at least one character was produced. */
+static int collect_word(char **pp, char *out, int outsz) {
+    char *p = *pp;
+    int oi = 0, got = 0;
+
+    while (*p && !is_space(*p) &&
+           *p != '|' && *p != ';' && *p != '<' && *p != '>' && *p != '&') {
+
+        if (*p == '\'') {
+            p++;
+            while (*p && *p != '\'') {
+                if (oi < outsz - 1) out[oi++] = *p;
+                p++;
+            }
+            if (*p == '\'') p++;
+            got = 1;
+        } else if (*p == '"') {
+            p++;
+            while (*p && *p != '"') {
+                if (*p == '\\' && *(p + 1)) {
+                    p++;
+                    if (oi < outsz - 1) out[oi++] = *p++;
+                } else if (*p == '$') {
+                    p++;
+                    oi += expand_dollar(&p, out + oi, outsz - oi);
+                } else {
+                    if (oi < outsz - 1) out[oi++] = *p++;
+                }
+            }
+            if (*p == '"') p++;
+            got = 1;
+        } else if (*p == '\\' && *(p + 1)) {
+            p++;
+            if (oi < outsz - 1) out[oi++] = *p++;
+            got = 1;
+        } else if (*p == '$') {
+            p++;
+            oi += expand_dollar(&p, out + oi, outsz - oi);
+            got = 1;
+        } else if (*p == '~' && !got) {
+            const char *home = env_get("HOME");
+            if (!home) home = "/";
+            while (*home && oi < outsz - 1) out[oi++] = *home++;
+            p++;
+            got = 1;
+        } else {
+            if (oi < outsz - 1) out[oi++] = *p++;
+            got = 1;
+        }
+    }
+
+    out[oi] = '\0';
+    *pp = p;
+    return got;
+}
+
+static char *next_word_buf(void) {
+    if (word_pool_top < WORD_POOL_SZ)
+        return word_pool[word_pool_top++];
+    return NULL;
+}
+
 static char *tokenise_cmd(char *s, Cmd *cmd) {
     char *p = s;
+    char *buf;
     memset(cmd, 0, sizeof(*cmd));
 
     while (1) {
         while (*p && is_space(*p)) p++;
-        if (*p == '\0' || *p == '|') break;
+        if (!*p || *p == '|') break;
 
         if (*p == '>') {
             p++;
             int append = (*p == '>');
             if (append) p++;
             while (*p && is_space(*p)) p++;
-            char *start = p;
-            while (*p && !is_space(*p) && *p != '|' && *p != '>' && *p != '<')
-                p++;
-            if (*p) { *p = '\0'; p++; }
-            if (append) cmd->redir_app = start;
-            else        cmd->redir_out = start;
+            buf = next_word_buf();
+            if (buf) {
+                collect_word(&p, buf, 256);
+                if (append) cmd->redir_app = buf;
+                else        cmd->redir_out = buf;
+            }
             continue;
         }
 
         if (*p == '<') {
             p++;
             while (*p && is_space(*p)) p++;
-            char *start = p;
-            while (*p && !is_space(*p) && *p != '|' && *p != '>' && *p != '<')
-                p++;
-            if (*p) { *p = '\0'; p++; }
-            cmd->redir_in = start;
+            buf = next_word_buf();
+            if (buf) {
+                collect_word(&p, buf, 256);
+                cmd->redir_in = buf;
+            }
             continue;
         }
 
-        char *start = p;
-        while (*p && !is_space(*p) && *p != '|' && *p != '>' && *p != '<')
-            p++;
-        if (*p) { *p = '\0'; p++; }
-        if (cmd->argc < MAX_ARGS - 1)
-            cmd->argv[cmd->argc++] = start;
+        buf = next_word_buf();
+        if (buf) {
+            collect_word(&p, buf, 256);
+            if (buf[0] != '\0' && cmd->argc < MAX_ARGS - 1)
+                cmd->argv[cmd->argc++] = buf;
+        } else {
+            char discard[256];
+            collect_word(&p, discard, sizeof(discard));
+        }
     }
 
     cmd->argv[cmd->argc] = NULL;
@@ -211,8 +329,10 @@ static void exec_pipeline(Cmd *cmds, int n) {
     if (n == 0) return;
 
     if (n == 1) {
-        if (builtin_run(cmds[0].argv, cmds[0].argc))
+        if (builtin_run(cmds[0].argv, cmds[0].argc)) {
+            last_exit = 0;
             return;
+        }
 
         pid_t pid = fork();
         if (pid == 0) {
@@ -223,6 +343,7 @@ static void exec_pipeline(Cmd *cmds, int n) {
         int status;
         waitpid(pid, &status, 0);
         fg_pid = -1;
+        last_exit = (status >> 8) & 0xff;
         return;
     }
 
@@ -253,6 +374,8 @@ static void exec_pipeline(Cmd *cmds, int n) {
     for (i = 0; i < n; i++) {
         int status;
         waitpid(pids[i], &status, 0);
+        if (i == n - 1)
+            last_exit = (status >> 8) & 0xff;
     }
 }
 
@@ -290,6 +413,7 @@ void shell_run(char **envp) {
         Cmd  cmds[MAX_PIPELINE];
         int  ncmds = 0;
         char *p = line;
+        word_pool_top = 0;
         while (*p && ncmds < MAX_PIPELINE) {
             p = tokenise_cmd(p, &cmds[ncmds]);
             if (cmds[ncmds].argc > 0)
