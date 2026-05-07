@@ -8,7 +8,9 @@ CACTLIB  = ../CactLib-x86_32
 START_O  = $(CACTLIB)/build/start.o
 LIBC_A   = $(CACTLIB)/libc.a
 
-SRCS = src/main.c src/readline.c src/shell.c src/builtin.c
+CORE_SRCS    = src/main.c src/readline.c src/shell.c src/builtin.c
+BUILTIN_SRCS = $(wildcard src/builtins/*.c)
+SRCS = $(CORE_SRCS) $(BUILTIN_SRCS)
 OBJS = $(SRCS:.c=.o)
 
 TARGET = cactsole

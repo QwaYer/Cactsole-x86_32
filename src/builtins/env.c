@@ -1,0 +1,86 @@
+/*
+ * builtins/env.c — переменные окружения и echo.
+ *
+ *   echo / export / unset / env
+ */
+
+#include "builtin.h"
+#include "builtins.h"
+#include "shell.h"
+
+#include <unistd.h>
+#include <string.h>
+
+static int cmd_echo(char **argv, int argc) {
+    int i;
+    for (i = 1; i < argc; i++) {
+        write(STDOUT_FILENO, argv[i], strlen(argv[i]));
+        if (i < argc - 1) write(STDOUT_FILENO, " ", 1);
+    }
+    write(STDOUT_FILENO, "\n", 1);
+    return 0;
+}
+
+static int cmd_export(char **argv, int argc) {
+    int i;
+    if (argc < 2) {
+        for (i = 0; shell_env[i]; i++) {
+            write(STDOUT_FILENO, "export ", 7);
+            write(STDOUT_FILENO, shell_env[i], strlen(shell_env[i]));
+            write(STDOUT_FILENO, "\n", 1);
+        }
+        return 0;
+    }
+    for (i = 1; i < argc; i++) {
+        char *arg = argv[i], *eq = arg;
+        char name[64]; int nlen;
+        while (*eq && *eq != '=') eq++;
+        nlen = (int)(eq - arg);
+        if (*eq == '=') {
+            if (nlen < 64) {
+                memcpy(name, arg, nlen); name[nlen] = '\0';
+                env_set(name, eq + 1);
+            }
+        } else {
+            if (!env_get(arg)) env_set(arg, "");
+        }
+    }
+    return 0;
+}
+
+static int cmd_unset(char **argv, int argc) {
+    int i;
+    for (i = 1; i < argc; i++) env_unset(argv[i]);
+    return 0;
+}
+
+static int cmd_env(char **argv, int argc) {
+    (void)argv; (void)argc;
+    int i;
+    for (i = 0; shell_env[i]; i++) {
+        write(STDOUT_FILENO, shell_env[i], strlen(shell_env[i]));
+        write(STDOUT_FILENO, "\n", 1);
+    }
+    return 0;
+}
+
+static const struct builtin_cmd table[] = {
+    {"echo",   cmd_echo},
+    {"export", cmd_export},
+    {"unset",  cmd_unset},
+    {"env",    cmd_env},
+    {NULL, NULL},
+};
+
+int env_run(char **argv, int argc) {
+    return builtin_table_run(table, argv, argc);
+}
+
+const char *env_help(void) {
+    return
+        "  Environment:\n"
+        "    echo [args...]         print arguments\n"
+        "    export [VAR[=v]]       set/list environment variables\n"
+        "    unset VAR...           remove environment variables\n"
+        "    env                    print all environment variables\n";
+}
