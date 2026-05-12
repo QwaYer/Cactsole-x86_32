@@ -1,7 +1,5 @@
 /*
- * builtins/env.c — переменные окружения и echo.
- *
- *   echo / export / unset / env
+ * builtins/env.c — export / unset / env (echo — /bin/echo).
  */
 
 #include "builtin.h"
@@ -10,16 +8,6 @@
 
 #include <unistd.h>
 #include <string.h>
-
-static int cmd_echo(char **argv, int argc) {
-    int i;
-    for (i = 1; i < argc; i++) {
-        write(STDOUT_FILENO, argv[i], strlen(argv[i]));
-        if (i < argc - 1) write(STDOUT_FILENO, " ", 1);
-    }
-    write(STDOUT_FILENO, "\n", 1);
-    return 0;
-}
 
 static int cmd_export(char **argv, int argc) {
     int i;
@@ -33,12 +21,14 @@ static int cmd_export(char **argv, int argc) {
     }
     for (i = 1; i < argc; i++) {
         char *arg = argv[i], *eq = arg;
-        char name[64]; int nlen;
+        char name[64];
+        int nlen;
         while (*eq && *eq != '=') eq++;
         nlen = (int)(eq - arg);
         if (*eq == '=') {
             if (nlen < 64) {
-                memcpy(name, arg, nlen); name[nlen] = '\0';
+                memcpy(name, arg, nlen);
+                name[nlen] = '\0';
                 env_set(name, eq + 1);
             }
         } else {
@@ -55,7 +45,8 @@ static int cmd_unset(char **argv, int argc) {
 }
 
 static int cmd_env(char **argv, int argc) {
-    (void)argv; (void)argc;
+    (void)argv;
+    (void)argc;
     int i;
     for (i = 0; shell_env[i]; i++) {
         write(STDOUT_FILENO, shell_env[i], strlen(shell_env[i]));
@@ -65,7 +56,6 @@ static int cmd_env(char **argv, int argc) {
 }
 
 static const struct builtin_cmd table[] = {
-    {"echo",   cmd_echo},
     {"export", cmd_export},
     {"unset",  cmd_unset},
     {"env",    cmd_env},
@@ -76,11 +66,15 @@ int env_run(char **argv, int argc) {
     return builtin_table_run(table, argv, argc);
 }
 
-const char *env_help(void) {
+const char *env_help_bin(void) {
     return
-        "  Environment:\n"
-        "    echo [args...]         print arguments\n"
-        "    export [VAR[=v]]       set/list environment variables\n"
-        "    unset VAR...           remove environment variables\n"
-        "    env                    print all environment variables\n";
+        "\nEnvironment:\n"
+        "  echo [args...]          use /bin/echo\n"
+        "  export [VAR[=value]]    set/list environment variables\n"
+        "  unset VAR...            remove environment variables\n"
+        "  env                     print all environment variables\n";
+}
+
+const char *env_help_sbin(void) {
+    return "";
 }

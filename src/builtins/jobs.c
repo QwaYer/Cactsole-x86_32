@@ -37,10 +37,14 @@ int jobs_run(char **argv, int argc) {
     return builtin_table_run(table, argv, argc);
 }
 
-const char *jobs_help(void) {
+const char *jobs_help_bin(void) {
     return
-        "  Jobs:\n"
-        "    jobs                   list background jobs\n"
-        "    fg [n]                 bring job n to foreground\n"
-        "    bg [n]                 resume job n in background\n";
+        "\nJobs:\n"
+        "  jobs                    list background jobs\n"
+        "  fg [n]                  bring job n to foreground\n"
+        "  bg [n]                  resume job n in background\n";
+}
+
+const char *jobs_help_sbin(void) {
+    return "";
 }

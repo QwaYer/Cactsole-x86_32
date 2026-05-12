@@ -1,46 +1,36 @@
 #ifndef BUILTINS_H
 #define BUILTINS_H
 
-/*
- * Каталог групп встроенных команд cactsole.
- *
- * Каждая группа выставляет два символа:
- *   <group>_run(argv, argc)  — выполняет команду argv[0] из этой группы
- *                              и возвращает её код завершения, либо -1,
- *                              если argv[0] этой группе не принадлежит;
- *   <group>_help()           — статическая строка-секция для команды `help`.
- *
- * Диспетчер builtin_run() вызывает группы по порядку, поэтому добавить
- * новую группу = создать src/builtins/<name>.c, реализовать пару функций
- * и сослаться на них в builtin.c.
- */
 
-/* navigation: cd, pwd */
 int         nav_run    (char **argv, int argc);
-const char *nav_help   (void);
+const char *nav_help_bin  (void);
+const char *nav_help_sbin (void);
 
-/* files: ls, mkdir, rmdir, tch, rm, cat, wrt, stat, mv, ln, readlink */
-int         files_run  (char **argv, int argc);
-const char *files_help (void);
 
-/* system: clear, date, uptime, kill, su, sleep, free, fetch */
-int         sys_run    (char **argv, int argc);
-const char *sys_help   (void);
+const char *files_help_bin  (void);
+const char *files_help_sbin (void);
 
-/* environment: echo, export, unset, env */
+
+const char *sys_help_bin  (void);
+const char *sys_help_sbin (void);
+
+
 int         env_run    (char **argv, int argc);
-const char *env_help   (void);
+const char *env_help_bin  (void);
+const char *env_help_sbin (void);
 
-/* jobs: jobs, fg, bg */
+
 int         jobs_run   (char **argv, int argc);
-const char *jobs_help  (void);
+const char *jobs_help_bin  (void);
+const char *jobs_help_sbin (void);
 
-/* misc: true, false, exit, whoami, id, chmod, chown, version, help */
+
 int         misc_run   (char **argv, int argc);
-const char *misc_help  (void);
+const char *misc_help_bin  (void);
+const char *misc_help_sbin (void);
 
-/* network: nsock, nopt, nconn, nlisten, nudp */
-int         net_run    (char **argv, int argc);
-const char *net_help   (void);
 
-#endif /* BUILTINS_H */
+const char *net_help_bin  (void);
+const char *net_help_sbin (void);
+
+#endif

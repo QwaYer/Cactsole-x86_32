@@ -38,6 +38,12 @@ typedef struct {
     char *redir_in;
     char *redir_out;
     char *redir_app;
+    char *redir_err;
+    char *redir_err_app;
+    char *redir_all;     /* &>   stdout+stderr */
+    char *redir_all_app; /* &>> */
+    int merge_err_to_out; /* 2>&1 */
+    int merge_out_to_err; /* 1>&2 */
 } Cmd;
 
 typedef struct {
@@ -52,6 +58,11 @@ static pid_t fg_pid = -1;
 
 static int is_space(char c) {
     return c == ' ' || c == '\t';
+}
+
+static int is_redir_suffix(char c) {
+    return c == '\0' || is_space(c) || c == '|' || c == ';' || c == '&' ||
+           c == '<' || c == '>';
 }
 
 static int starts_with_n(const char *s, const char *p, int n) {
@@ -125,7 +136,6 @@ static void env_init(char **envp) {
     shell_env = env_buf;
 }
 
-/* ── Job table ──────────────────────────────────────────────────────── */
 
 static int job_add(pid_t pid, const char *cmd) {
     int i;
@@ -155,7 +165,7 @@ static void notify_done_jobs(void) {
             write(STDOUT_FILENO, "[", 1);
             itoa(i + 1, num);
             write(STDOUT_FILENO, num, strlen(num));
-            write(STDOUT_FILENO, "] Done\t", 7);
+            write(STDOUT_FILENO, "] done     ", 11);
             write(STDOUT_FILENO, jobs[i].cmd, strlen(jobs[i].cmd));
             write(STDOUT_FILENO, "\n", 1);
             jobs[i].pid  = 0;
@@ -175,9 +185,9 @@ void shell_list_jobs(void) {
             write(STDOUT_FILENO, num, strlen(num));
             write(STDOUT_FILENO, "] ", 2);
             if (jobs[i].done) {
-                write(STDOUT_FILENO, "Done   \t", 8);
+                write(STDOUT_FILENO, "done     ", 9);
             } else {
-                write(STDOUT_FILENO, "Running\t", 8);
+                write(STDOUT_FILENO, "running  ", 9);
             }
             write(STDOUT_FILENO, jobs[i].cmd, strlen(jobs[i].cmd));
             write(STDOUT_FILENO, "\n", 1);
@@ -217,7 +227,6 @@ int shell_bg_job(int n) {
     return 0;
 }
 
-/* ── PATH / exec helpers ────────────────────────────────────────────── */
 
 static int path_find_exec(const char *cmd, char *out, int outsz) {
     const char *p = cmd;
@@ -228,7 +237,7 @@ static int path_find_exec(const char *cmd, char *out, int outsz) {
 
     {
         const char *path = env_get("PATH");
-        if (!path) path = "/bin:/usr/bin";
+        if (!path) path = "/bin:/sbin:/usr/bin";
         int cmdlen = strlen((char *)cmd);
         const char *seg = path;
         while (*seg) {
@@ -314,16 +323,22 @@ static int collect_word(char **pp, char *out, int outsz) {
             if (*p == '"') p++;
             got = 1;
         } else if (*p == '\\' && *(p+1)) {
-            p++; if (oi < outsz-1) out[oi++] = *p++; got = 1;
+            p++;
+            if (oi < outsz-1) out[oi++] = *p++;
+            got = 1;
         } else if (*p == '$') {
-            p++; oi += expand_dollar(&p, out+oi, outsz-oi); got = 1;
+            p++;
+            oi += expand_dollar(&p, out+oi, outsz-oi);
+            got = 1;
         } else if (*p == '~' && !got) {
             const char *home = env_get("HOME");
             if (!home) home = "/";
             while (*home && oi < outsz-1) out[oi++] = *home++;
-            p++; got = 1;
+            p++;
+            got = 1;
         } else {
-            if (oi < outsz-1) out[oi++] = *p++; got = 1;
+            if (oi < outsz-1) out[oi++] = *p++;
+            got = 1;
         }
     }
     out[oi] = '\0';
@@ -349,8 +364,46 @@ static char *tokenise_cmd(char *s, Cmd *cmd, int *sep) {
         if (*p == '|')                  { *sep = SEP_PIPE;  p++;    break; }
         if (*p == ';')                  { *sep = SEP_SEMI;  p++;    break; }
         if (*p == '&' && *(p+1) == '&') { *sep = SEP_AND;   p += 2; break; }
+        if (*p == '&' && *(p + 1) == '>') {
+            p += 2;
+            int append = (*p == '>');
+            if (append) p++;
+            while (*p && is_space(*p)) p++;
+            buf = next_word_buf();
+            if (buf) {
+                collect_word(&p, buf, 256);
+                if (append) cmd->redir_all_app = buf;
+                else         cmd->redir_all     = buf;
+            }
+            continue;
+        }
         if (*p == '&')                  { *sep = SEP_BG;    p++;    break; }
 
+        if (p[0] == '2' && p[1] == '>' && p[2] == '&' && p[3] == '1' &&
+            is_redir_suffix(p[4])) {
+            p += 4;
+            cmd->merge_err_to_out = 1;
+            continue;
+        }
+        if (p[0] == '1' && p[1] == '>' && p[2] == '&' && p[3] == '2' &&
+            is_redir_suffix(p[4])) {
+            p += 4;
+            cmd->merge_out_to_err = 1;
+            continue;
+        }
+        if (*p == '2' && *(p + 1) == '>') {
+            p += 2;
+            int append = (*p == '>');
+            if (append) p++;
+            while (*p && is_space(*p)) p++;
+            buf = next_word_buf();
+            if (buf) {
+                collect_word(&p, buf, 256);
+                if (append) cmd->redir_err_app = buf;
+                else         cmd->redir_err     = buf;
+            }
+            continue;
+        }
         if (*p == '>') {
             p++;
             int append = (*p == '>'); if (append) p++;
@@ -416,24 +469,92 @@ static void apply_redirections(Cmd *cmd) {
         }
         dup2(fd, STDIN_FILENO); close(fd);
     }
-    if (cmd->redir_out) {
-        fd = open(cmd->redir_out, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    /* &> / &>> — one file for stdout and stderr */
+    if (cmd->redir_all || cmd->redir_all_app) {
+        const char *path = cmd->redir_all_app ? cmd->redir_all_app : cmd->redir_all;
+        int fl         = O_WRONLY | O_CREAT |
+                         (cmd->redir_all_app ? O_APPEND : O_TRUNC);
+        fd = open(path, fl, 0644);
         if (fd < 0) {
             write(STDERR_FILENO, "cactsole: cannot open ", 22);
-            write(STDERR_FILENO, cmd->redir_out, strlen(cmd->redir_out));
+            write(STDERR_FILENO, path, strlen(path));
             write(STDERR_FILENO, "\n", 1); exit(1);
         }
-        dup2(fd, STDOUT_FILENO); close(fd);
+        dup2(fd, STDOUT_FILENO);
+        dup2(fd, STDERR_FILENO);
+        close(fd);
+    } else {
+        if (cmd->redir_out) {
+            fd = open(cmd->redir_out, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            if (fd < 0) {
+                write(STDERR_FILENO, "cactsole: cannot open ", 22);
+                write(STDERR_FILENO, cmd->redir_out, strlen(cmd->redir_out));
+                write(STDERR_FILENO, "\n", 1); exit(1);
+            }
+            dup2(fd, STDOUT_FILENO); close(fd);
+        }
+        if (cmd->redir_app) {
+            fd = open(cmd->redir_app, O_WRONLY | O_CREAT | O_APPEND, 0644);
+            if (fd < 0) {
+                write(STDERR_FILENO, "cactsole: cannot open ", 22);
+                write(STDERR_FILENO, cmd->redir_app, strlen(cmd->redir_app));
+                write(STDERR_FILENO, "\n", 1); exit(1);
+            }
+            dup2(fd, STDOUT_FILENO); close(fd);
+        }
     }
-    if (cmd->redir_app) {
-        fd = open(cmd->redir_app, O_WRONLY | O_CREAT | O_APPEND, 0644);
+    if (cmd->redir_err) {
+        fd = open(cmd->redir_err, O_WRONLY | O_CREAT | O_TRUNC, 0644);
         if (fd < 0) {
             write(STDERR_FILENO, "cactsole: cannot open ", 22);
-            write(STDERR_FILENO, cmd->redir_app, strlen(cmd->redir_app));
+            write(STDERR_FILENO, cmd->redir_err, strlen(cmd->redir_err));
             write(STDERR_FILENO, "\n", 1); exit(1);
         }
-        dup2(fd, STDOUT_FILENO); close(fd);
+        dup2(fd, STDERR_FILENO); close(fd);
     }
+    if (cmd->redir_err_app) {
+        fd = open(cmd->redir_err_app, O_WRONLY | O_CREAT | O_APPEND, 0644);
+        if (fd < 0) {
+            write(STDERR_FILENO, "cactsole: cannot open ", 22);
+            write(STDERR_FILENO, cmd->redir_err_app, strlen(cmd->redir_err_app));
+            write(STDERR_FILENO, "\n", 1); exit(1);
+        }
+        dup2(fd, STDERR_FILENO); close(fd);
+    }
+    if (cmd->merge_err_to_out)
+        dup2(STDOUT_FILENO, STDERR_FILENO);
+    if (cmd->merge_out_to_err)
+        dup2(STDERR_FILENO, STDOUT_FILENO);
+}
+
+static int normalize_exit(int st) {
+    if (st < 0) return 255;
+    if (st > 255) return 255;
+    return st;
+}
+
+/* Если сюда попали — в образе, скорее всего, устаревший cactsole без встроек. */
+static int is_shell_reserved_name(const char *name) {
+    static const char *const only[] = {
+        "cd", "export", "unset", "env", "jobs", "fg", "bg", "exit", "help", NULL,
+    };
+    int i;
+    if (!name) return 0;
+    for (i = 0; only[i]; i++)
+        if (strcmp((char *)name, (char *)only[i]) == 0) return 1;
+    return 0;
+}
+
+static void warn_stale_shell(const char *name) {
+    static const char a[] = "cactsole: ";
+    static const char b[] =
+        ": shell built-in missing from this binary (wrong/stale cactsole in cctkfs?). ";
+    static const char c[] =
+        "Rebuild Cactsole-x86_32, run `make -C LocalRepoCactOS all`, update GRUB module.\n";
+    write(STDERR_FILENO, a, sizeof(a) - 1);
+    write(STDERR_FILENO, name, strlen(name));
+    write(STDERR_FILENO, b, sizeof(b) - 1);
+    write(STDERR_FILENO, c, sizeof(c) - 1);
 }
 
 static void exec_external(char **argv) {
@@ -451,9 +572,27 @@ static void exec_pipeline(Cmd *cmds, int n, int bg) {
     char jnum[16], jpid[16];
     if (n == 0) return;
 
+    if (n >= 2 && cmds[0].argc >= 1 && strcmp((char *)cmds[0].argv[0], "cd") == 0) {
+        int st = 0;
+        if (builtin_invoke(cmds[0].argv, cmds[0].argc, &st)) {
+            last_exit = normalize_exit(st);
+            exec_pipeline(cmds + 1, n - 1, bg);
+            return;
+        }
+    }
+
     if (n == 1) {
-        int rc = builtin_run(cmds[0].argv, cmds[0].argc);
-        if (rc >= 0) { last_exit = rc; return; }
+        int st;
+        if (builtin_invoke(cmds[0].argv, cmds[0].argc, &st)) {
+            last_exit = normalize_exit(st);
+            return;
+        }
+
+        if (cmds[0].argc > 0 && is_shell_reserved_name(cmds[0].argv[0])) {
+            warn_stale_shell(cmds[0].argv[0]);
+            last_exit = 127;
+            return;
+        }
 
         pid_t pid = fork();
         if (pid == 0) {
@@ -478,17 +617,52 @@ static void exec_pipeline(Cmd *cmds, int n, int bg) {
     }
 
     int pipes[MAX_PIPELINE - 1][2];
-    for (i = 0; i < n - 1; i++) pipe(pipes[i]);
+    for (i = 0; i < MAX_PIPELINE - 1; i++) {
+        pipes[i][0] = -1;
+        pipes[i][1] = -1;
+    }
+    for (i = 0; i < n - 1; i++) {
+        if (pipe(pipes[i]) < 0) {
+            int j;
+            for (j = 0; j < i; j++) {
+                if (pipes[j][0] >= 0) close(pipes[j][0]);
+                if (pipes[j][1] >= 0) close(pipes[j][1]);
+            }
+            write(STDERR_FILENO, "cactsole: pipe failed\n", 22);
+            last_exit = 1;
+            return;
+        }
+    }
 
     pid_t pids[MAX_PIPELINE];
     for (i = 0; i < n; i++) {
         pids[i] = fork();
+        if (pids[i] < 0) {
+            int j;
+            for (j = 0; j < n - 1; j++) {
+                if (pipes[j][0] >= 0) close(pipes[j][0]);
+                if (pipes[j][1] >= 0) close(pipes[j][1]);
+            }
+            for (j = 0; j < i; j++) waitpid(pids[j], NULL, 0);
+            write(STDERR_FILENO, "cactsole: fork failed\n", 22);
+            last_exit = 1;
+            return;
+        }
         if (pids[i] == 0) {
             int j;
             if (i > 0)   dup2(pipes[i-1][0], STDIN_FILENO);
             if (i < n-1) dup2(pipes[i][1],   STDOUT_FILENO);
             for (j = 0; j < n-1; j++) { close(pipes[j][0]); close(pipes[j][1]); }
             apply_redirections(&cmds[i]);
+            {
+                int st;
+                if (builtin_invoke(cmds[i].argv, cmds[i].argc, &st))
+                    _exit(normalize_exit(st));
+                if (cmds[i].argc > 0 && is_shell_reserved_name(cmds[i].argv[0])) {
+                    warn_stale_shell(cmds[i].argv[0]);
+                    _exit(127);
+                }
+            }
             exec_external(cmds[i].argv);
         }
     }
@@ -580,9 +754,9 @@ void shell_run(char **envp) {
         notify_done_jobs();
 
         if (getcwd(cwd, sizeof(cwd)) == NULL) cwd[0] = '\0';
-        write(STDOUT_FILENO, "[", 1);
+        write(STDOUT_FILENO, "cact:", 5);
         write(STDOUT_FILENO, cwd, strlen(cwd));
-        write(STDOUT_FILENO, "] $ ", 4);
+        write(STDOUT_FILENO, "$ ", 2);
 
         int n = readline(line, sizeof(line));
         if (n < 0) { write(STDOUT_FILENO, "exit\n", 5); break; }

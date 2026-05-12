@@ -1,17 +1,3 @@
-/*
- * builtin.c — диспетчер встроенных команд cactsole.
- *
- * Сами команды живут в src/builtins/<group>.c.  Здесь только две функции:
- *
- *   builtin_table_run() — общий поиск-и-вызов в локальной таблице группы;
- *   builtin_run()       — обходит группы по очереди до первого совпадения.
- *
- * Чтобы добавить новую группу команд:
- *   1) создать src/builtins/<name>.c, реализовать <name>_run / <name>_help;
- *   2) добавить пару в include/builtins.h;
- *   3) дописать строку в массив groups[] ниже и в put_section() в misc.c.
- */
-
 #include "builtin.h"
 #include "builtins.h"
 
@@ -30,20 +16,31 @@ typedef int (*group_run_fn)(char **argv, int argc);
 
 static const group_run_fn groups[] = {
     nav_run,
-    files_run,
-    sys_run,
     env_run,
     jobs_run,
     misc_run,
-    net_run,
     NULL,
 };
 
-int builtin_run(char **argv, int argc) {
-    if (argc == 0 || argv[0] == NULL) return -1;
+int builtin_invoke(char **argv, int argc, int *status) {
+    if (argc == 0 || argv[0] == NULL || status == NULL) return 0;
     for (int i = 0; groups[i] != NULL; i++) {
         int rc = groups[i](argv, argc);
-        if (rc != -1) return rc;
+        if (rc != -1) {
+            *status = rc;
+            return 1;
+        }
     }
-    return -1;
+    return 0;
+}
+
+int builtin_run(char **argv, int argc) {
+    int st;
+    if (!builtin_invoke(argv, argc, &st))
+        return -1;
+    if (st < 0)
+        return 255;
+    if (st > 255)
+        return 255;
+    return st;
 }

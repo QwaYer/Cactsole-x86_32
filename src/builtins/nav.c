@@ -1,8 +1,5 @@
 /*
- * builtins/nav.c — навигация по файловой системе.
- *
- *   cd [DIR]   сменить текущий каталог; без аргументов — переход в $HOME (или /).
- *   pwd        напечатать текущий каталог.
+ * builtins/nav.c — только cd (pwd — отдельный ELF /bin/pwd).
  */
 
 #include "builtin.h"
@@ -29,29 +26,22 @@ static int cmd_cd(char **argv, int argc) {
     return 0;
 }
 
-static int cmd_pwd(char **argv, int argc) {
-    (void)argv; (void)argc;
-    char buf[512];
-    if (getcwd(buf, sizeof(buf)) != NULL) {
-        write(STDOUT_FILENO, buf, strlen(buf));
-        write(STDOUT_FILENO, "\n", 1);
-    }
-    return 0;
-}
-
 static const struct builtin_cmd table[] = {
-    {"cd",  cmd_cd},
-    {"pwd", cmd_pwd},
-    {NULL,  NULL},
+    {"cd", cmd_cd},
+    {NULL, NULL},
 };
 
 int nav_run(char **argv, int argc) {
     return builtin_table_run(table, argv, argc);
 }
 
-const char *nav_help(void) {
+const char *nav_help_bin(void) {
     return
-        "  Navigation:\n"
-        "    cd [dir]               change directory (default $HOME)\n"
-        "    pwd                    print working directory\n";
+        "\nNavigation:\n"
+        "  cd [dir]                change directory (default: $HOME)\n"
+        "  pwd                     use /bin/pwd\n";
+}
+
+const char *nav_help_sbin(void) {
+    return "";
 }

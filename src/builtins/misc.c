@@ -1,28 +1,13 @@
 /*
- * builtins/misc.c — прочие команды, включая `help`.
- *
- *   true / false / exit / whoami / id / chmod / chown / version / help
- *
- * Команда help аккумулирует секции из всех групп через builtins.h,
- * чтобы добавление новой группы автоматически отражалось в выводе.
+ * builtins/misc.c — exit, help. Остальное — ELF в CactUserBins-x86_32 → /bin.
  */
 
 #include "builtin.h"
-#include "builtins.h"
-#include "version.h"
+#include "builtins.h" /* misc_help_* declarations */
 
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stat.h>
-
-static int cmd_true(char **argv, int argc) {
-    (void)argv; (void)argc; return 0;
-}
-
-static int cmd_false(char **argv, int argc) {
-    (void)argv; (void)argc; return 1;
-}
 
 static int cmd_exit(char **argv, int argc) {
     int code = (argc >= 2) ? atoi(argv[1]) : 0;
@@ -30,133 +15,72 @@ static int cmd_exit(char **argv, int argc) {
     return 0;
 }
 
-static int cmd_whoami(char **argv, int argc) {
-    (void)argv; (void)argc;
-    uid_t uid = getuid();
-    char num[16];
-    if (uid == 0) {
-        write(STDOUT_FILENO, "root\n", 5);
-    } else {
-        write(STDOUT_FILENO, "user", 4);
-        itoa((int)uid, num);
-        write(STDOUT_FILENO, num, strlen(num));
-        write(STDOUT_FILENO, "\n", 1);
-    }
-    return 0;
-}
-
-static int cmd_id(char **argv, int argc) {
-    (void)argv; (void)argc;
-    char num[16];
-    uid_t uid  = getuid();
-    gid_t gid  = getgid();
-    uid_t euid = geteuid();
-    gid_t egid = getegid();
-
-    write(STDOUT_FILENO, "uid=", 4);
-    itoa((int)uid,  num); write(STDOUT_FILENO, num, strlen(num));
-    write(STDOUT_FILENO, " gid=", 5);
-    itoa((int)gid,  num); write(STDOUT_FILENO, num, strlen(num));
-    write(STDOUT_FILENO, " euid=", 6);
-    itoa((int)euid, num); write(STDOUT_FILENO, num, strlen(num));
-    write(STDOUT_FILENO, " egid=", 6);
-    itoa((int)egid, num); write(STDOUT_FILENO, num, strlen(num));
-    write(STDOUT_FILENO, "\n", 1);
-    return 0;
-}
-
-static int cmd_chmod(char **argv, int argc) {
-    if (argc < 3) {
-        write(STDERR_FILENO, "usage: chmod MODE FILE...\n", 26);
-        return 1;
-    }
-    int mode = 0;
-    const char *s = argv[1];
-    while (*s >= '0' && *s <= '7') {
-        mode = mode * 8 + (*s - '0');
-        s++;
-    }
-    if (*s != '\0') {
-        write(STDERR_FILENO, "chmod: invalid mode (use octal, e.g. 755)\n", 43);
-        return 1;
-    }
-    int i, ret = 0;
-    for (i = 2; i < argc; i++) {
-        if (chmod(argv[i], mode) != 0) {
-            write(STDERR_FILENO, "chmod: ", 7);
-            write(STDERR_FILENO, argv[i], strlen(argv[i]));
-            write(STDERR_FILENO, ": failed\n", 9);
-            ret = 1;
-        }
-    }
-    return ret;
-}
-
-static int cmd_chown(char **argv, int argc) {
-    if (argc < 3) {
-        write(STDERR_FILENO, "usage: chown OWNER[:GROUP] FILE...\n", 35);
-        return 1;
-    }
-    const char *spec = argv[1];
-    int uid = 0, gid = -1;
-    const char *p = spec;
-    while (*p >= '0' && *p <= '9') { uid = uid * 10 + (*p - '0'); p++; }
-    if (*p == ':') {
-        p++;
-        gid = 0;
-        while (*p >= '0' && *p <= '9') { gid = gid * 10 + (*p - '0'); p++; }
-    }
-    if (*p != '\0') {
-        write(STDERR_FILENO, "chown: invalid owner (use numeric uid[:gid])\n", 45);
-        return 1;
-    }
-    int i, ret = 0;
-    for (i = 2; i < argc; i++) {
-        if (chown(argv[i], uid, gid) != 0) {
-            write(STDERR_FILENO, "chown: ", 7);
-            write(STDERR_FILENO, argv[i], strlen(argv[i]));
-            write(STDERR_FILENO, ": failed\n", 9);
-            ret = 1;
-        }
-    }
-    return ret;
-}
-
-static int cmd_version(char **argv, int argc) {
-    (void)argv; (void)argc;
-    static const char msg[] = "cactsole " CACTSOLE_VERSION "\n";
-    write(STDOUT_FILENO, msg, sizeof(msg) - 1);
-    return 0;
-}
-
-static void put_section(const char *s) {
-    write(STDOUT_FILENO, s, strlen((char *)s));
-}
-
 static int cmd_help(char **argv, int argc) {
-    (void)argv; (void)argc;
-    static const char header[] = "cactsole built-in commands:\n";
-    write(STDOUT_FILENO, header, sizeof(header) - 1);
-    put_section(nav_help());
-    put_section(files_help());
-    put_section(sys_help());
-    put_section(env_help());
-    put_section(jobs_help());
-    put_section(misc_help());
-    put_section(net_help());
+    (void)argv;
+    (void)argc;
+    /* Plain help: one command (or group) per line, short gloss on the right. */
+    static const char page[] =
+        "\n"
+        "cactsole help\n"
+        "\n"
+        "usage:  COMMAND [ARGS...]  ;  CMD1 | CMD2  ;  CMD &\n"
+        "\n"
+        "cd [DIR]                    chdir; omit DIR -> $HOME\n"
+        "export [NAME[=VAL] ...]     set or list env vars\n"
+        "unset NAME ...              remove env vars\n"
+        "env                         print environment\n"
+        "jobs                        list background jobs\n"
+        "fg [N]  bg [N]              job control (N defaults to 1)\n"
+        "exit [CODE]                 leave shell (default 0)\n"
+        "help                        this screen\n"
+        "\n"
+        "pwd                         print working directory\n"
+        "ls                          list directory\n"
+        "mkdir                       make directory\n"
+        "rmdir                       remove empty directory\n"
+        "tch                         touch file\n"
+        "rm                          remove file\n"
+        "cat                         print file\n"
+        "wrt                         write file\n"
+        "stat                        file metadata\n"
+        "mv                          move or rename\n"
+        "ln                          hard link\n"
+        "readlink                    read symlink target\n"
+        "clear                       clear screen\n"
+        "date                        print date/time\n"
+        "uptime                      uptime\n"
+        "sleep                       sleep seconds\n"
+        "free                        memory summary\n"
+        "fetch                       HTTP fetch\n"
+        "run                         run script or command\n"
+        "echo                        print arguments\n"
+        "true                        exit 0\n"
+        "false                       exit 1\n"
+        "whoami                      current user\n"
+        "id                          user id\n"
+        "chmod                       change mode\n"
+        "chown                       change owner\n"
+        "version                     system version\n"
+        "nconn                       network connect\n"
+        "net                         network client\n"
+        "\n"
+        "kill                        send signal\n"
+        "su                          substitute user\n"
+        "modload                     load kernel module\n"
+        "modunload                   unload kernel module\n"
+        "ping                        ICMP echo\n"
+        "dhcp                        DHCP client\n"
+        "dns                         DNS lookup\n"
+        "\n"
+        "PIPE                        if line starts with  cd DIR  then a pipe,\n"
+        "                            the shell runs cd first (e.g. cd /bin then ls).\n";
+    write(STDOUT_FILENO, page, sizeof(page) - 1);
     return 0;
 }
 
 static const struct builtin_cmd table[] = {
-    {"true",    cmd_true},
-    {"false",   cmd_false},
-    {"exit",    cmd_exit},
-    {"whoami",  cmd_whoami},
-    {"id",      cmd_id},
-    {"chmod",   cmd_chmod},
-    {"chown",   cmd_chown},
-    {"version", cmd_version},
-    {"help",    cmd_help},
+    {"exit", cmd_exit},
+    {"help", cmd_help},
     {NULL, NULL},
 };
 
@@ -164,16 +88,10 @@ int misc_run(char **argv, int argc) {
     return builtin_table_run(table, argv, argc);
 }
 
-const char *misc_help(void) {
-    return
-        "  Misc:\n"
-        "    true                   exit 0\n"
-        "    false                  exit 1\n"
-        "    exit [code]            exit the shell\n"
-        "    whoami                 print current user name\n"
-        "    id                     print uid/gid/euid/egid\n"
-        "    chmod MODE FILE...     change file permissions (octal)\n"
-        "    chown OWNER[:GRP] F... change file owner (numeric)\n"
-        "    version                print shell version\n"
-        "    help                   show this message\n";
+const char *misc_help_bin(void) {
+    return "";
+}
+
+const char *misc_help_sbin(void) {
+    return "";
 }

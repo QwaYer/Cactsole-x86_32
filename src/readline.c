@@ -40,23 +40,17 @@ void readline_cleanup(void) {
 }
 
 static void redraw_line(const char *buf, int len, int cur, int prev_len) {
-    /* Move cursor to start of editable area, rewrite, clear tail */
     int i;
-    /* Erase from current position to end of old content */
     if (prev_len > 0) {
-        /* Go back to start: cur characters left */
         for (i = 0; i < cur; i++)
             write(STDOUT_FILENO, "\033[D", 3);
     }
     write(STDOUT_FILENO, buf, len);
-    /* Erase any leftover chars from a shorter previous line */
     for (i = len; i < prev_len; i++)
         write(STDOUT_FILENO, " ", 1);
-    /* Move cursor back to cur position */
     for (i = len; i > cur; i--)
         write(STDOUT_FILENO, "\033[D", 3);
     if (prev_len > len) {
-        /* Also move back the erased padding */
         int pad = prev_len - len;
         for (i = 0; i < pad; i++)
             write(STDOUT_FILENO, "\033[D", 3);
@@ -66,7 +60,6 @@ static void redraw_line(const char *buf, int len, int cur, int prev_len) {
 void readline_add_history(const char *line) {
     if (line[0] == '\0')
         return;
-    /* Avoid duplicate of last entry */
     if (hist_len > 0 && strcmp(hist_buf[(hist_len - 1) % HIST_MAX], (char *)line) == 0)
         return;
     strncpy(hist_buf[hist_len % HIST_MAX], line, LINE_MAX - 1);
@@ -78,7 +71,7 @@ int readline(char *out, int max) {
     char buf[LINE_MAX];
     int  len = 0;
     int  cur = 0;
-    int  hist_idx = hist_len; /* points past last entry = "empty" */
+    int  hist_idx = hist_len; 
     char saved_line[LINE_MAX];
     saved_line[0] = '\0';
 
@@ -86,8 +79,8 @@ int readline(char *out, int max) {
         max = LINE_MAX;
 
     while (1) {
-        char c;
-        if (read(STDIN_FILENO, &c, 1) <= 0)
+        unsigned char c;
+        if (read(STDIN_FILENO, &c, 1) != 1)
             break;
 
         if (c == '\n' || c == '\r') {
@@ -98,32 +91,29 @@ int readline(char *out, int max) {
             return len;
         }
 
-        if (c == '\x03') { /* Ctrl+C */
+        if (c == '\x03') { 
             write(STDOUT_FILENO, "^C\n", 3);
             out[0] = '\0';
             return 0;
         }
 
-        if (c == '\x04' && len == 0) { /* Ctrl+D on empty line */
+        if (c == '\x04' && len == 0) { 
             write(STDOUT_FILENO, "\n", 1);
             out[0] = '\0';
             return -1;
         }
 
-        if (c == '\x7f' || c == '\b') { /* Backspace */
+        if (c == '\x7f' || c == '\b') { 
             if (cur > 0) {
-                /* Shift left */
                 int i;
                 for (i = cur - 1; i < len - 1; i++)
                     buf[i] = buf[i + 1];
                 cur--;
                 len--;
                 buf[len] = '\0';
-                /* Move cursor back one, redraw suffix + space */
                 write(STDOUT_FILENO, "\033[D", 3);
                 write(STDOUT_FILENO, buf + cur, len - cur);
                 write(STDOUT_FILENO, " ", 1);
-                /* Move cursor back to cur */
                 int back = len - cur + 1;
                 for (i = 0; i < back; i++)
                     write(STDOUT_FILENO, "\033[D", 3);
@@ -131,78 +121,143 @@ int readline(char *out, int max) {
             continue;
         }
 
-        if (c == '\x1b') { /* Escape sequence */
-            char seq[3];
-            if (read(STDIN_FILENO, &seq[0], 1) <= 0) continue;
-            if (seq[0] != '[') continue;
-            if (read(STDIN_FILENO, &seq[1], 1) <= 0) continue;
-
-            int prev_len = len;
-
-            if (seq[1] == 'A') { /* Up arrow — previous history */
-                if (hist_idx > 0) {
-                    if (hist_idx == hist_len)
-                        strncpy(saved_line, buf, len);
-                    hist_idx--;
-                    int slot = hist_idx % HIST_MAX;
-                    strncpy(buf, hist_buf[slot], LINE_MAX - 1);
-                    buf[LINE_MAX - 1] = '\0';
-                    len = strlen(buf);
-                    cur = len;
-                    redraw_line(buf, len, cur, prev_len);
-                }
-            } else if (seq[1] == 'B') { /* Down arrow — next history */
-                if (hist_idx < hist_len) {
-                    hist_idx++;
-                    if (hist_idx == hist_len) {
-                        strncpy(buf, saved_line, LINE_MAX - 1);
-                    } else {
+        if (c == '\x1b') { 
+            unsigned char b;
+            if (read(STDIN_FILENO, &b, 1) != 1)
+                continue;
+            if (b == 'O') {
+                unsigned char b2;
+                if (read(STDIN_FILENO, &b2, 1) != 1)
+                    continue;
+                int prev_len = len;
+                if (b2 == 'A') {
+                    if (hist_idx > 0) {
+                        if (hist_idx == hist_len)
+                            strncpy(saved_line, buf, (size_t)len);
+                        hist_idx--;
                         int slot = hist_idx % HIST_MAX;
                         strncpy(buf, hist_buf[slot], LINE_MAX - 1);
+                        buf[LINE_MAX - 1] = '\0';
+                        len = (int)strlen(buf);
+                        cur = len;
+                        redraw_line(buf, len, cur, prev_len);
                     }
-                    buf[LINE_MAX - 1] = '\0';
-                    len = strlen(buf);
-                    cur = len;
-                    redraw_line(buf, len, cur, prev_len);
-                }
-            } else if (seq[1] == 'C') { /* Right arrow */
-                if (cur < len) {
+                } else if (b2 == 'B') {
+                    if (hist_idx < hist_len) {
+                        hist_idx++;
+                        if (hist_idx == hist_len) {
+                            strncpy(buf, saved_line, LINE_MAX - 1);
+                        } else {
+                            int slot = hist_idx % HIST_MAX;
+                            strncpy(buf, hist_buf[slot], LINE_MAX - 1);
+                        }
+                        buf[LINE_MAX - 1] = '\0';
+                        len = (int)strlen(buf);
+                        cur = len;
+                        redraw_line(buf, len, cur, prev_len);
+                    }
+                } else if (b2 == 'C' && cur < len) {
                     write(STDOUT_FILENO, "\033[C", 3);
                     cur++;
-                }
-            } else if (seq[1] == 'D') { /* Left arrow */
-                if (cur > 0) {
+                } else if (b2 == 'D' && cur > 0) {
                     write(STDOUT_FILENO, "\033[D", 3);
                     cur--;
+                } else if (b2 == 'H') {
+                    while (cur > 0) {
+                        write(STDOUT_FILENO, "\033[D", 3);
+                        cur--;
+                    }
+                } else if (b2 == 'F') {
+                    while (cur < len) {
+                        write(STDOUT_FILENO, "\033[C", 3);
+                        cur++;
+                    }
                 }
-            } else if (seq[1] == 'H' || seq[1] == '1') { /* Home */
-                while (cur > 0) {
-                    write(STDOUT_FILENO, "\033[D", 3);
-                    cur--;
+                continue;
+            }
+            if (b != '[')
+                continue;
+            unsigned char fin = 0;
+            int k;
+            for (k = 0; k < 24; k++) {
+                if (read(STDIN_FILENO, &b, 1) != 1) {
+                    fin = 0;
+                    break;
                 }
-            } else if (seq[1] == 'F' || seq[1] == '4') { /* End */
-                while (cur < len) {
+                if ((b >= 0x30u && b <= 0x3fu) || (b >= 0x20u && b <= 0x2fu))
+                    continue;
+                fin = b;
+                break;
+            }
+            if (fin == 0)
+                continue;
+            if (fin == 'O') {
+                if (read(STDIN_FILENO, &b, 1) == 1) {
+                    if (b == 'H')
+                        fin = 'H';
+                    else if (b == 'F')
+                        fin = 'F';
+                }
+            }
+            {
+                int prev_len = len;
+                if (fin == 'A') {
+                    if (hist_idx > 0) {
+                        if (hist_idx == hist_len)
+                            strncpy(saved_line, buf, (size_t)len);
+                        hist_idx--;
+                        int slot = hist_idx % HIST_MAX;
+                        strncpy(buf, hist_buf[slot], LINE_MAX - 1);
+                        buf[LINE_MAX - 1] = '\0';
+                        len = (int)strlen(buf);
+                        cur = len;
+                        redraw_line(buf, len, cur, prev_len);
+                    }
+                } else if (fin == 'B') {
+                    if (hist_idx < hist_len) {
+                        hist_idx++;
+                        if (hist_idx == hist_len) {
+                            strncpy(buf, saved_line, LINE_MAX - 1);
+                        } else {
+                            int slot = hist_idx % HIST_MAX;
+                            strncpy(buf, hist_buf[slot], LINE_MAX - 1);
+                        }
+                        buf[LINE_MAX - 1] = '\0';
+                        len = (int)strlen(buf);
+                        cur = len;
+                        redraw_line(buf, len, cur, prev_len);
+                    }
+                } else if (fin == 'C' && cur < len) {
                     write(STDOUT_FILENO, "\033[C", 3);
                     cur++;
+                } else if (fin == 'D' && cur > 0) {
+                    write(STDOUT_FILENO, "\033[D", 3);
+                    cur--;
+                } else if (fin == 'H') {
+                    while (cur > 0) {
+                        write(STDOUT_FILENO, "\033[D", 3);
+                        cur--;
+                    }
+                } else if (fin == 'F') {
+                    while (cur < len) {
+                        write(STDOUT_FILENO, "\033[C", 3);
+                        cur++;
+                    }
                 }
             }
             continue;
         }
 
-        /* Printable character: insert at cur */
         if (c >= 0x20 && c < 0x7f && len < max - 1) {
             int i;
-            /* Shift right */
             for (i = len; i > cur; i--)
                 buf[i] = buf[i - 1];
-            buf[cur] = c;
+            buf[cur] = (char)c;
             len++;
-            /* Echo the char and redraw suffix */
             write(STDOUT_FILENO, &c, 1);
             cur++;
             if (cur < len) {
                 write(STDOUT_FILENO, buf + cur, len - cur);
-                /* Move cursor back */
                 for (i = 0; i < len - cur; i++)
                     write(STDOUT_FILENO, "\033[D", 3);
             }
