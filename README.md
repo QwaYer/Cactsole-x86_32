@@ -38,33 +38,27 @@
 | **[CactUserBins-x86_32](../CactUserBins-x86_32)** | **36** `/bin` and `/sbin` tools; the shell **`execve`**s them after **`PATH`** lookup |
 | **[Cgoct-x86_32](../Cgoct-x86_32)** | Supervisor that respawns **`/bin/cactsole`** (and optionally **`cactsole-rescue`** — same ELF, different staged path in **LocalRepoCactOS**) |
 | **[LocalRepoCactOS](../LocalRepoCactOS)** | Stages **`cactsole`** into **`cctkfs`** as **`/bin/cactsole`** |
+| **[CactOS-x86_32](https://github.com/QwaYer/CactOS-x86_32)** | **Integrator** — builds **CactLib**, then **`make CACTLIB=…`** here, then **LocalRepo** / **kernel** / **ISO** |
 | **[CactKernel-x86_32](https://github.com/QwaYer/CactKernel-x86_32)** | First userspace is **`init`**; normal flow reaches **cactsole** as the interactive front-end |
 
 ---
 
 ## 🔨 Building
 
-**Prerequisites**
+**Recommended — full workspace**
 
-| Tool | Notes |
-|------|-------|
-| `gcc -m32` | **`gcc-multilib`** on amd64 |
-| `ld -m elf_i386` | **`-pie --no-dynamic-linker`** |
-| **`../CactLib-x86_32`** | **`make`** there first (invoked automatically as a dependency) |
+Run **`make`** or **`make -C CactOS-x86_32 iso`** from the **parent** of all sibling repos — **CactOS** builds **CactLib** first, then invokes **`make CACTLIB=…`** here.
 
-**Targets**
+**Standalone — this repository**
 
 ```sh
-make -j"$(nproc)"     # build ./cactsole
-make clean            # remove *.o and cactsole
+make -j"$(nproc)"   # auto-detects ../CactLib-x86_32 → ./cactsole
+make clean
 ```
 
-**Install into cctkfs staging** (same pattern as other userspace ELFs):
+Override path if needed: `make CACTLIB=/custom/path`.
 
-```sh
-make -C ../Cactsole-x86_32
-make -C ../LocalRepoCactOS   # copies into lib/bin/ and repacks cctkfs.img
-```
+**Staging into cctkfs** is normally done by **[CactOS-x86_32](https://github.com/QwaYer/CactOS-x86_32)** → **LocalRepoCactOS**; this repo does not call other **`Makefile`**s by path.
 
 ---
 

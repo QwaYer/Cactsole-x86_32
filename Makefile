@@ -1,14 +1,21 @@
+_ACTIVE := $(filter-out clean,$(or $(MAKECMDGOALS),all))
+
+CACTLIB ?= $(abspath ../CactLib-x86_32)
+
+ifneq ($(_ACTIVE),)
+ifndef CACTLIB
+$(error Set CACTLIB to the libc project root (built by CactOS-x86_32 target libc))
+endif
+endif
+
 CC      = gcc
 LD      = ld
 
-# PIE: -fPIE для генерации position-independent кода, линкуется через -pie.
-# Линкуемся против libc.so динамически; libc.a больше не нужна в этой цепочке.
 CFLAGS  = -m32 -ffreestanding -fPIE -fno-stack-protector -nostdlib \
-          -I./include -I../CactLib-x86_32/include -Wall -Wextra
+          -I./include -I$(CACTLIB)/include -Wall -Wextra
 LDFLAGS = -m elf_i386 -pie --no-dynamic-linker --hash-style=both \
           -nostdlib -T link.ld
 
-CACTLIB  = ../CactLib-x86_32
 START_O  = $(CACTLIB)/build/pic/start.o
 LIBC_SO  = $(CACTLIB)/libc.so
 
@@ -21,11 +28,8 @@ TARGET = cactsole
 
 all: $(LIBC_SO) $(START_O) $(TARGET)
 
-$(LIBC_SO):
-	$(MAKE) -C $(CACTLIB)
-
-$(START_O):
-	$(MAKE) -C $(CACTLIB)
+$(LIBC_SO) $(START_O):
+	@test -f $(LIBC_SO) && test -f $(START_O) || (echo >&2 "Missing libc or start.o — build libc first (CACTLIB=$(CACTLIB))"; exit 1)
 
 $(TARGET): $(OBJS) $(START_O) $(LIBC_SO) link.ld
 	$(LD) $(LDFLAGS) $(START_O) $(OBJS) $(LIBC_SO) -o $@
