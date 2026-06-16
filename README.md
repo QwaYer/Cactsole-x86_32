@@ -1,7 +1,7 @@
 # 💬 Cactsole/x86_32
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.0.0-green.svg?style=for-the-badge" alt="Version: 1.0.0">
+  <img src="https://img.shields.io/badge/version-2.0.0-green.svg?style=for-the-badge" alt="Version: 2.0.0">
   <img src="https://img.shields.io/badge/license-GPLv3-blue.svg?style=for-the-badge" alt="License: GPLv3">
   <img src="https://img.shields.io/badge/arch-i686-red.svg?style=for-the-badge" alt="Arch: i686">
   <img src="https://img.shields.io/badge/language-C-orange.svg?style=for-the-badge" alt="Language: C">
@@ -20,7 +20,7 @@
 
 | | |
 |---|---|
-| **Version** | **1.0.0** — macros in [`include/version.h`](include/version.h) and [`VERSION`](VERSION) |
+| **Version** | **2.0.0** — macros in [`include/version.h`](include/version.h) and [`VERSION`](VERSION) |
 | **Prompt** | **`cact:`** *cwd* **`$ `** (see [`shell_run`](src/shell.c)) |
 | **Line / history** | Input up to **1024** chars; ring history **64** lines ([`readline.c`](src/readline.c)) |
 | **Parser limits** | Up to **64** argv words, **8** pipeline stages, **16** background jobs ([`shell.c`](src/shell.c)) |
