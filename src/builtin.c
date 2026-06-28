@@ -2,13 +2,24 @@
 #include "builtins.h"
 
 #include <string.h>
+#include <unistd.h>
 
 int builtin_table_run(const struct builtin_cmd *table,
                       char **argv, int argc) {
     if (argc == 0 || argv[0] == NULL) return -1;
-    for (int i = 0; table[i].name != NULL; i++)
-        if (strcmp(argv[0], (char *)table[i].name) == 0)
+    for (int i = 0; table[i].name != NULL; i++) {
+        if (strcmp(argv[0], (char *)table[i].name) == 0) {
+            if (argc >= 2 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
+                if (table[i].help) {
+                    write(STDOUT_FILENO, "  ", 2);
+                    write(STDOUT_FILENO, table[i].help, strlen(table[i].help));
+                    write(STDOUT_FILENO, "\n", 1);
+                }
+                return 0;
+            }
             return table[i].fn(argv, argc);
+        }
+    }
     return -1;
 }
 

@@ -56,10 +56,10 @@ static int cmd_env(char **argv, int argc) {
 }
 
 static const struct builtin_cmd table[] = {
-    {"export", cmd_export},
-    {"unset",  cmd_unset},
-    {"env",    cmd_env},
-    {NULL, NULL},
+    {"export", cmd_export, "export [VAR=value]  set/list environment variables"},
+    {"unset",  cmd_unset,  "unset VAR...        remove environment variables"},
+    {"env",    cmd_env,    "env                 print all environment variables"},
+    {NULL, NULL, NULL},
 };
 
 int env_run(char **argv, int argc) {
@@ -68,11 +68,7 @@ int env_run(char **argv, int argc) {
 
 const char *env_help_bin(void) {
     return
-        "\nEnvironment:\n"
-        "  echo [args...]          use /bin/echo\n"
-        "  export [VAR[=value]]    set/list environment variables\n"
-        "  unset VAR...            remove environment variables\n"
-        "  env                     print all environment variables\n";
+        "  echo [args...]     print arguments (/bin/echo)\n";
 }
 
 const char *env_help_sbin(void) {

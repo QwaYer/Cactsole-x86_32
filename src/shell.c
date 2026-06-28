@@ -754,9 +754,30 @@ void shell_run(char **envp) {
         notify_done_jobs();
 
         if (getcwd(cwd, sizeof(cwd)) == NULL) cwd[0] = '\0';
-        write(STDOUT_FILENO, "cact:", 5);
-        write(STDOUT_FILENO, cwd, strlen(cwd));
-        write(STDOUT_FILENO, "$ ", 2);
+        {
+            char pbuf[256];
+            int  pn = 0, i;
+            const char *green = "\033[1;92m";
+            const char *blue  = "\033[1;94m";
+            const char *reset = "\033[0m";
+            const char *p = green;
+            while (*p) pbuf[pn++] = *p++;
+            p = "cact:";
+            while (*p) pbuf[pn++] = *p++;
+            p = reset;
+            while (*p) pbuf[pn++] = *p++;
+            p = blue;
+            while (*p) pbuf[pn++] = *p++;
+            for (i = 0; cwd[i] && pn < (int)sizeof(pbuf) - 10; i++)
+                pbuf[pn++] = cwd[i];
+            p = reset;
+            while (*p) pbuf[pn++] = *p++;
+            pbuf[pn++] = '$';
+            pbuf[pn++] = ' ';
+            pbuf[pn] = '\0';
+            write(STDOUT_FILENO, pbuf, pn);
+            readline_set_prompt(pbuf);
+        }
 
         int n = readline(line, sizeof(line));
         if (n < 0) { write(STDOUT_FILENO, "exit\n", 5); break; }

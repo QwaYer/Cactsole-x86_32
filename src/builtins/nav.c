@@ -27,8 +27,8 @@ static int cmd_cd(char **argv, int argc) {
 }
 
 static const struct builtin_cmd table[] = {
-    {"cd", cmd_cd},
-    {NULL, NULL},
+    {"cd", cmd_cd, "cd [dir]         change directory (default: $HOME)"},
+    {NULL, NULL, NULL},
 };
 
 int nav_run(char **argv, int argc) {
@@ -37,9 +37,7 @@ int nav_run(char **argv, int argc) {
 
 const char *nav_help_bin(void) {
     return
-        "\nNavigation:\n"
-        "  cd [dir]                change directory (default: $HOME)\n"
-        "  pwd                     use /bin/pwd\n";
+        "  pwd               print working directory (/bin/pwd)\n";
 }
 
 const char *nav_help_sbin(void) {

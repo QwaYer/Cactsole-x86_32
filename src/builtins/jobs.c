@@ -8,6 +8,7 @@
 #include "builtins.h"
 #include "shell.h"
 
+#include <unistd.h>
 #include <stdlib.h>
 
 static int cmd_jobs(char **argv, int argc) {
@@ -27,10 +28,10 @@ static int cmd_bg(char **argv, int argc) {
 }
 
 static const struct builtin_cmd table[] = {
-    {"jobs", cmd_jobs},
-    {"fg",   cmd_fg},
-    {"bg",   cmd_bg},
-    {NULL, NULL},
+    {"jobs", cmd_jobs, "jobs               list background jobs"},
+    {"fg",   cmd_fg,   "fg [n]             bring job n to foreground (default: 1)"},
+    {"bg",   cmd_bg,   "bg [n]             resume job n in background (default: 1)"},
+    {NULL, NULL, NULL},
 };
 
 int jobs_run(char **argv, int argc) {
@@ -38,11 +39,7 @@ int jobs_run(char **argv, int argc) {
 }
 
 const char *jobs_help_bin(void) {
-    return
-        "\nJobs:\n"
-        "  jobs                    list background jobs\n"
-        "  fg [n]                  bring job n to foreground\n"
-        "  bg [n]                  resume job n in background\n";
+    return "";
 }
 
 const char *jobs_help_sbin(void) {
