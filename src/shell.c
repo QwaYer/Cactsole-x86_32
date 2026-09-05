@@ -739,6 +739,17 @@ static void run_line(char *line) {
     }
 }
 
+int shell_run_cmd(const char *cmd, char **envp) {
+    if (!cmd) return 0;
+    env_init(envp);
+    char line[LINE_MAX];
+    int i = 0;
+    while (cmd[i] && i < (int)sizeof(line) - 1) { line[i] = cmd[i]; i++; }
+    line[i] = '\0';
+    run_line(line);
+    return last_exit;
+}
+
 void shell_run(char **envp) {
     char line[LINE_MAX];
     char cwd[256];

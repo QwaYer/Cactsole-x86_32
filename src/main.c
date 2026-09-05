@@ -16,11 +16,15 @@ int main(int argc, char *argv[], char *envp[]) {
                 "cactsole " CACTSOLE_VERSION " — interactive shell for Cact OS\n"
                 "\n"
                 "usage:  cactsole              start interactive shell\n"
+                "        cactsole -c 'cmd'      run one command and exit\n"
                 "        cactsole --help        show this message\n"
                 "        cactsole --version     show version\n"
                 "\n";
             write(STDOUT_FILENO, usage, sizeof(usage) - 1);
             return 0;
+        }
+        if (strcmp(argv[1], "-c") == 0 && argc >= 3) {
+            return shell_run_cmd(argv[2], envp);
         }
     }
     (void)argc; (void)argv;
