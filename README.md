@@ -5,7 +5,7 @@
   <img src="https://img.shields.io/badge/license-GPLv3-blue.svg?style=for-the-badge" alt="License: GPLv3">
   <img src="https://img.shields.io/badge/arch-i686-red.svg?style=for-the-badge" alt="Arch: i686">
   <img src="https://img.shields.io/badge/language-C-orange.svg?style=for-the-badge" alt="Language: C">
-  <img src="https://img.shields.io/badge/link-PIE%20%2B%20libc.so-purple.svg?style=for-the-badge" alt="PIE + libc.so">
+  <img src="https://img.shields.io/badge/link-PIE%20%2B%20clibc.so-purple.svg?style=for-the-badge" alt="PIE + clibc.so">
   <img src="https://img.shields.io/badge/binary-cactsole-0369a1.svg?style=for-the-badge" alt="cactsole">
 </p>
 
@@ -26,7 +26,7 @@
 | **Parser limits** | Up to **64** argv words, **8** pipeline stages, **16** background jobs ([`shell.c`](src/shell.c)) |
 | **Environment** | Up to **256** tracked `NAME=value` pairs in the shell copy of **`environ`** |
 | **Builtins** | **`cd`**, **`export`** / **`unset`** / **`env`**, **`jobs`** / **`fg`** / **`bg`**, **`exit`**, **`help`** |
-| **Load address** | PIE **ET_DYN** at **`0x08000000`** ([`link.ld`](link.ld)); **`libc.so`** at **`0x10000000`** (CactLib) |
+| **Load address** | PIE **ET_DYN** at **`0x08000000`** ([`link.ld`](link.ld)); **`clibc.so`** at **`0x10000000`** (CactLib) |
 
 ---
 
@@ -34,7 +34,7 @@
 
 | Component | Role |
 |-----------|------|
-| **[CactLib-x86_32](https://github.com/QwaYer/CactLib-x86_32)** | **`libc.so`** + **`build/pic/start.o`** — syscalls, **`execve`**, **`tcgetattr`** for raw line input, etc. |
+| **[CactLib-x86_32](https://github.com/QwaYer/CactLib-x86_32)** | **`clibc.so`** + **`build/pic/start.o`** — syscalls, **`execve`**, **`tcgetattr`** for raw line input, etc. |
 | **[CactUserBins-x86_32](../CactUserBins-x86_32)** | **36** `/bin` and `/sbin` tools; the shell **`execve`**s them after **`PATH`** lookup |
 | **[Cgoct-x86_32](../Cgoct-x86_32)** | Supervisor that respawns **`/bin/cactsole`** (and optionally **`cactsole-rescue`** — same ELF, different staged path in **LocalRepoCactOS**) |
 | **[LocalRepoCactOS](../LocalRepoCactOS)** | Stages **`cactsole`** into **`cctkfs`** as **`/bin/cactsole`** |

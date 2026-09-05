@@ -17,7 +17,7 @@ LDFLAGS = -m elf_i386 -pie --dynamic-linker=/lib/ld.so --hash-style=both \
           -nostdlib -T link.ld
 
 START_O  = $(CACTLIB)/build/pic/start.o
-LIBC_SO  = $(CACTLIB)/libc.so
+LIBC_SO  = $(CACTLIB)/clibc.so
 
 CORE_SRCS    = src/main.c src/readline.c src/shell.c src/builtin.c
 BUILTIN_SRCS = $(wildcard src/builtins/*.c)
