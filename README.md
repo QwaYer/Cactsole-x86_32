@@ -47,18 +47,19 @@
 
 **Recommended — full workspace**
 
-Run **`make`** or **`make -C CactOS-x86_32 iso`** from the **parent** of all sibling repos — **CactOS** builds **CactLib** first, then invokes **`make CACTLIB=…`** here.
+Run **`ninja -C CactOS-x86_32/build-meson stage`** from the **parent** of all sibling repos — **CactOS** builds **CactLibc** first, then builds this shell.
 
 **Standalone — this repository**
 
 ```sh
-make -j"$(nproc)"   # auto-detects ../CactLib-x86_32 → ./cactsole
-make clean
+meson setup build-meson --cross-file cross/i686-cact-clang.ini
+ninja -C build-meson   # auto-detects ../CactLibc-x86_32 → build-meson/cactsole
+ninja -C build-meson clean
 ```
 
-Override path if needed: `make CACTLIB=/custom/path`.
+Override the libc path if needed: `meson configure build-meson -Dcactlib=/custom/path`.
 
-**Staging into cctkfs** is normally done by **[CactOS-x86_32](https://github.com/QwaYer/CactOS-x86_32)** → **LocalRepoCactOS**; this repo does not call other **`Makefile`**s by path.
+**Staging into cctkfs** is normally done by **[CactOS-x86_32](https://github.com/QwaYer/CactOS-x86_32)** → **LocalRepoCactOS**; this repo does not call sibling builds by path.
 
 ---
 
@@ -66,7 +67,7 @@ Override path if needed: `make CACTLIB=/custom/path`.
 
 ```
 Cactsole-x86_32/
-├── Makefile
+├── meson.build
 ├── link.ld
 ├── LICENSE
 ├── VERSION
