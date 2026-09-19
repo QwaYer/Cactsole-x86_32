@@ -38,10 +38,6 @@ int jobs_run(char **argv, int argc) {
     return builtin_table_run(table, argv, argc);
 }
 
-const char *jobs_help_bin(void) {
-    return "";
-}
-
-const char *jobs_help_sbin(void) {
-    return "";
+const struct builtin_cmd *jobs_table(void) {
+    return table;
 }

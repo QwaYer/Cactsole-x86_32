@@ -13,4 +13,6 @@ void shell_list_jobs(void);
 int  shell_fg_job(int n);
 int  shell_bg_job(int n);
 
+int  shell_path_find(const char *cmd, char *out, int outsz);
+
 #endif

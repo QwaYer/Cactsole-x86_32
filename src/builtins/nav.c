@@ -35,11 +35,6 @@ int nav_run(char **argv, int argc) {
     return builtin_table_run(table, argv, argc);
 }
 
-const char *nav_help_bin(void) {
-    return
-        "  pwd               print working directory (/bin/pwd)\n";
-}
-
-const char *nav_help_sbin(void) {
-    return "";
+const struct builtin_cmd *nav_table(void) {
+    return table;
 }

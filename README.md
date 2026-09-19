@@ -72,10 +72,10 @@ Cactsole-x86_32/
 ├── LICENSE
 ├── VERSION
 ├── include/
-│   ├── shell.h           # env + job control hooks for builtins
+│   ├── shell.h           # env + job control + PATH lookup for builtins
 │   ├── readline.h
 │   ├── builtin.h
-│   ├── builtins.h        # nav/env/jobs/misc group runners + help decls
+│   ├── builtins.h        # nav/env/jobs/misc group runners + their tables
 │   └── version.h
 └── src/
     ├── main.c            # shell_run(envp)
@@ -86,11 +86,14 @@ Cactsole-x86_32/
         ├── nav.c         # cd
         ├── env.c         # export, unset, env
         ├── jobs.c        # jobs, fg, bg
-        ├── misc.c        # exit, help (static command list)
-        ├── files_help.c  # categorized help strings (files)
-        ├── sys_help.c    # … (system utilities)
-        └── net_help.c    # … (network)
+        └── misc.c        # exit, help (builtins + PATH listing)
 ```
+
+Command descriptions live next to the commands. cactsole documents only the
+builtins it implements; `help` reads the program list from the `PATH`
+directories at run time, and `help <command>` **runs the program with
+`--help`** and lets it document itself. Nothing in this repo enumerates the
+**CactUserBins** tools or their options.
 
 ---
 
@@ -116,4 +119,8 @@ After **cgoct** prints **`supervisor online`**, you should see the prompt:
 cact:/$
 ```
 
-Type **`help`** for the built-in overview (short gloss for every **CactUserBins** tool the shell expects on **`PATH`**). Typing **`exit`** returns control to **cgoct**, which may restart the shell according to **`/etc/cgoct.conf`**.
+Type **`help`** for the builtins cactsole implements plus every program it can
+see on **`PATH`**. **`help <command>`** prints a builtin's usage, or runs a
+separate program with **`--help`** so the program documents itself — every
+**CactUserBins** tool accepts **`--help`**. Typing **`exit`** returns control to
+**cgoct**, which may restart the shell according to **`/etc/cgoct.conf`**.

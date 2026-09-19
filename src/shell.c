@@ -228,7 +228,7 @@ int shell_bg_job(int n) {
 }
 
 
-static int path_find_exec(const char *cmd, char *out, int outsz) {
+int shell_path_find(const char *cmd, char *out, int outsz) {
     const char *p = cmd;
     struct stat st;
     int i;
@@ -559,7 +559,7 @@ static void warn_stale_shell(const char *name) {
 
 static void exec_external(char **argv) {
     char path[512];
-    path_find_exec(argv[0], path, sizeof(path));
+    shell_path_find(argv[0], path, sizeof(path));
     execve(path, argv, shell_env);
     write(STDERR_FILENO, "cactsole: ", 10);
     write(STDERR_FILENO, argv[0], strlen(argv[0]));

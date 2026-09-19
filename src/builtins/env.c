@@ -66,11 +66,6 @@ int env_run(char **argv, int argc) {
     return builtin_table_run(table, argv, argc);
 }
 
-const char *env_help_bin(void) {
-    return
-        "  echo [args...]     print arguments (/bin/echo)\n";
-}
-
-const char *env_help_sbin(void) {
-    return "";
+const struct builtin_cmd *env_table(void) {
+    return table;
 }
