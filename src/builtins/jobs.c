@@ -1,5 +1,5 @@
 /*
- * builtins/jobs.c — управление фоновыми задачами.
+ * builtins/jobs.c — background job control.
  *
  *   jobs / fg / bg
  */

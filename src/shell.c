@@ -569,7 +569,7 @@ static int normalize_exit(int st) {
     return st;
 }
 
-/* Если сюда попали — в образе, скорее всего, устаревший cactsole без встроек. */
+/* If we got here, the image most likely has an outdated cactsole without builtins. */
 static int is_shell_reserved_name(const char *name) {
     static const char *const only[] = {
         "cd", "export", "unset", "env", "jobs", "fg", "bg", "exit", "help", NULL,

@@ -1,5 +1,5 @@
 /*
- * builtins/nav.c — только cd (pwd — отдельный ELF /bin/pwd).
+ * builtins/nav.c — cd only (pwd is a separate ELF /bin/pwd).
  */
 
 #include "builtin.h"

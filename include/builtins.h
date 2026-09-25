@@ -4,9 +4,9 @@
 #include "builtin.h"
 
 /*
- * Каждый runner отдаёт наружу свою таблицу билтинов.  `help` печатает
- * список билтинов из этих таблиц, поэтому описания команд существуют
- * ровно в одном месте — рядом с их реализацией.
+ * Each runner exposes its own builtin table.  `help` prints the
+ * list of builtins from these tables, so the command descriptions exist
+ * in exactly one place — next to their implementation.
  */
 
 int         nav_run  (char **argv, int argc);

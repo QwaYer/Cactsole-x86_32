@@ -1,10 +1,10 @@
 /*
  * builtins/misc.c — exit, help.
  *
- * `help` намеренно не держит каталог команд.  Всё, что лежит в CactUserBins,
- * он не описывает, а читает из каталогов PATH во время вызова; описания есть
- * только у билтинов — рядом с их реализацией, в тех же таблицах, по которым
- * они и исполняются.  Поэтому вывод не может разъехаться с реальностью.
+ * `help` deliberately keeps no command catalogue.  Everything in CactUserBins
+ * it does not describe, but reads from the PATH directories at call time; only
+ * the builtins have descriptions — next to their implementation, in the same
+ * tables by which they are executed.  So the output cannot diverge from reality.
  */
 
 #include "builtin.h"
@@ -179,9 +179,9 @@ static int cmd_help(char **argv, int argc) {
         if (builtin_invoke(help_argv, 2, &st))
             return st;
 
-        /* Не билтин: справку печатает сама программа — у каждой утилиты
-         * CactUserBins есть --help.  Шелл запускает её и отдаёт вывод как
-         * есть: своих описаний чужих команд он не хранит. */
+        /* Not a builtin: the program prints its own help — every
+         * CactUserBins utility has --help.  The shell runs it and passes the
+         * output through as is: it keeps no descriptions of other commands. */
         char path[512];
         if (shell_path_find(argv[1], path, sizeof(path)) != 0) {
             err("cactsole: '");

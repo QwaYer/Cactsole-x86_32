@@ -1,7 +1,7 @@
 /*
- * Линкер-скрипт для cactsole — PIE (ET_DYN) с фиксированной VA 0x08000000.
- * clibc.so живёт на 0x10000000 (см. CactLib-x86_32/libc.ld), запас между
- * сегментами кода около 128 МБ — конфликтов по PT_LOAD не будет.
+ * Linker script for cactsole — PIE (ET_DYN) with a fixed VA 0x08000000.
+ * clibc.so lives at 0x10000000 (see CactLibc-x86_32/libc.ld), the gap between
+ * the code segments is about 128 MB — there will be no PT_LOAD conflicts.
  */
 
 ENTRY(_start)
