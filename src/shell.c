@@ -3,6 +3,7 @@
 #include "builtin.h"
 #include <unistd.h>
 #include <signal.h>
+#include <wait.h>
 #include <fcntl.h>
 #include <string.h>
 #include <stdlib.h>
@@ -49,6 +50,7 @@ typedef struct {
 typedef struct {
     pid_t pid;
     int   done;
+    int   stopped;
     char  cmd[64];
 } Job;
 
@@ -143,6 +145,7 @@ static int job_add(pid_t pid, const char *cmd) {
         if (jobs[i].pid == 0) {
             jobs[i].pid  = pid;
             jobs[i].done = 0;
+            jobs[i].stopped = 0;
             if (cmd) {
                 int j;
                 for (j = 0; cmd[j] && j < 63; j++) jobs[i].cmd[j] = cmd[j];
@@ -155,6 +158,25 @@ static int job_add(pid_t pid, const char *cmd) {
         }
     }
     return -1;
+}
+
+/* Ctrl-Z (SIGSTOP from the console) turns the running foreground job into a
+ * tracked stopped job, so jobs/fg/bg can find it again. */
+static int job_mark_stopped(pid_t pid, const char *cmd) {
+    int n = job_add(pid, cmd);
+    if (n > 0)
+        jobs[n - 1].stopped = 1;
+    return n;
+}
+
+static void job_report_stopped(int n, const char *cmd) {
+    char num[16];
+    write(STDOUT_FILENO, "[", 1);
+    itoa(n, num);
+    write(STDOUT_FILENO, num, strlen(num));
+    write(STDOUT_FILENO, "]+ Stopped  ", 12);
+    write(STDOUT_FILENO, cmd, strlen(cmd));
+    write(STDOUT_FILENO, "\n", 1);
 }
 
 static void notify_done_jobs(void) {
@@ -186,6 +208,8 @@ void shell_list_jobs(void) {
             write(STDOUT_FILENO, "] ", 2);
             if (jobs[i].done) {
                 write(STDOUT_FILENO, "done     ", 9);
+            } else if (jobs[i].stopped) {
+                write(STDOUT_FILENO, "stopped  ", 9);
             } else {
                 write(STDOUT_FILENO, "running  ", 9);
             }
@@ -208,13 +232,24 @@ int shell_fg_job(int n) {
     {
         pid_t pid = jobs[n-1].pid;
         int status;
+        /* A stopped job has to be resumed, or the wait below never returns. */
+        if (jobs[n-1].stopped) {
+            kill(pid, (int)SIGCONT);
+            jobs[n-1].stopped = 0;
+        }
         fg_pid = pid;
-        waitpid(pid, &status, 0);
+        waitpid(pid, &status, WUNTRACED);
         fg_pid = -1;
+
+        if (WIFSTOPPED(status)) {
+            jobs[n-1].stopped = 1;
+            return 128 + WSTOPSIG(status);
+        }
         jobs[n-1].pid  = 0;
         jobs[n-1].done = 0;
+        jobs[n-1].stopped = 0;
         jobs[n-1].cmd[0] = '\0';
-        return (status >> 8) & 0xff;
+        return WEXITSTATUS(status);
     }
 }
 
@@ -224,6 +259,7 @@ int shell_bg_job(int n) {
         return 1;
     }
     kill(jobs[n-1].pid, (int)SIGCONT);
+    jobs[n-1].stopped = 0;
     return 0;
 }
 
@@ -609,9 +645,16 @@ static void exec_pipeline(Cmd *cmds, int n, int bg) {
             last_exit = 0;
         } else {
             fg_pid = pid;
-            int status; waitpid(pid, &status, 0);
+            int status; waitpid(pid, &status, WUNTRACED);
             fg_pid = -1;
-            last_exit = (status >> 8) & 0xff;
+            if (WIFSTOPPED(status)) {
+                /* Ctrl-Z parked it: keep it addressable for jobs/fg/bg. */
+                int jn = job_mark_stopped(pid, cmds[0].argv[0]);
+                if (jn > 0) job_report_stopped(jn, cmds[0].argv[0]);
+                last_exit = 128 + WSTOPSIG(status);
+            } else {
+                last_exit = WEXITSTATUS(status);
+            }
         }
         return;
     }
@@ -678,8 +721,17 @@ static void exec_pipeline(Cmd *cmds, int n, int bg) {
         last_exit = 0;
     } else {
         for (i = 0; i < n; i++) {
-            int status; waitpid(pids[i], &status, 0);
-            if (i == n-1) last_exit = (status >> 8) & 0xff;
+            int status;
+            waitpid(pids[i], &status, (i == n - 1) ? WUNTRACED : 0);
+            if (i == n-1) {
+                if (WIFSTOPPED(status)) {
+                    int jn = job_mark_stopped(pids[n-1], cmds[0].argv[0]);
+                    if (jn > 0) job_report_stopped(jn, cmds[0].argv[0]);
+                    last_exit = 128 + WSTOPSIG(status);
+                } else {
+                    last_exit = WEXITSTATUS(status);
+                }
+            }
         }
     }
 }
