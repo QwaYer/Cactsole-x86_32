@@ -34,11 +34,11 @@
 
 | Component | Role |
 |-----------|------|
-| **[CactLib-x86_32](https://github.com/QwaYer/CactLib-x86_32)** | **`clibc.so`** + **`build/pic/start.o`** — syscalls, **`execve`**, **`tcgetattr`** for raw line input, etc. |
-| **[CactUserBins-x86_32](../CactUserBins-x86_32)** | **36** `/bin` and `/sbin` tools; the shell **`execve`**s them after **`PATH`** lookup |
-| **[Cgoct-x86_32](../Cgoct-x86_32)** | Supervisor that respawns **`/bin/cactsole`** (and optionally **`cactsole-rescue`** — same ELF, different staged path in **LocalRepoCactOS**) |
-| **[LocalRepoCactOS](../LocalRepoCactOS)** | Stages **`cactsole`** into **`cctkfs`** as **`/bin/cactsole`** |
-| **[CactOS-x86_32](https://github.com/QwaYer/CactOS-x86_32)** | **Integrator** — builds **CactLib**, then **`make CACTLIB=…`** here, then **LocalRepo** / **kernel** / **ISO** |
+| **[CactLib-x86_32](https://github.com/QwaYer/CactLibc-x86_32)** | **`clibc.so`** + **`build-meson/start.o`** — syscalls, **`execve`**, **`tcgetattr`** for raw line input, etc. |
+| **[CactUserBins-x86_32](../CactUserBins-x86_32)** | **46** `/bin` and `/sbin` tools; the shell **`execve`**s them after **`PATH`** lookup |
+| **[Cgoct-x86_32](../Cgoct-x86_32)** | Supervisor that respawns **`/bin/cactsole`** (and optionally **`cactsole-rescue`** — same ELF, different staged path in **LocalRepoCactOS-x86_32**) |
+| **[LocalRepoCactOS-x86_32](../LocalRepoCactOS-x86_32)** | Stages **`cactsole`** into **`cctkfs`** as **`/bin/cactsole`** |
+| **[CactOS-x86_32](https://github.com/QwaYer/CactOS-x86_32)** | **Integrator** — builds **CactLib**, then runs the **Meson**/**Ninja** build here, then **LocalRepo** / **kernel** / **ISO** |
 | **[CactKernel-x86_32](https://github.com/QwaYer/CactKernel-x86_32)** | First userspace is **`init`**; normal flow reaches **cactsole** as the interactive front-end |
 
 ---
@@ -104,6 +104,7 @@ directories at run time, and `help <command>` **runs the program with
 | **Pipelines** | Stages separated by **`|`** (up to **`MAX_PIPELINE`**) |
 | **Lists** | **`;`** between commands; **`&&`** / **`||`** for conditional chains |
 | **Background** | Trailing **`&`** on a simple command or pipeline tail |
+| **Job control** | A foreground job stopped with **Ctrl-Z** / **`SIGSTOP`** stays tracked — **`jobs`** lists it as **`stopped`**, and **`fg`** / **`bg`** resume it with **`SIGCONT`** |
 | **Redirections** | **`<`**, **`>`**, **`>>`**, **`2>`**, **`2>>`**, **`&>`** / **`&>>`**, **`2>&1`**, **`1>&2`** |
 | **`cd` + pipe** | If the line begins with **`cd DIR`** then a **`|`** pipeline, **`cd`** runs in the shell before the rest of the pipeline (see comments in [`shell.c`](src/shell.c)) |
 | **Signals** | **`SIGINT`** / **`SIGCHLD`** handlers integrate job notifications and **Ctrl+C** |
