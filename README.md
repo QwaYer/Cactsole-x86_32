@@ -22,7 +22,7 @@
 |---|---|
 | **Version** | **2.0.0** — macros in [`include/version.h`](include/version.h) and [`VERSION`](VERSION) |
 | **Prompt** | **`cact:`** *cwd* **`$ `** (see [`shell_run`](src/shell.c)) |
-| **Line / history** | Input up to **1024** chars; ring history **64** lines ([`readline.c`](src/readline.c)) |
+| **Line / history** | Input up to **1024** chars; ring history **64** lines; blinking block caret ([`readline.c`](src/readline.c)) |
 | **Parser limits** | Up to **64** argv words, **8** pipeline stages, **16** background jobs ([`shell.c`](src/shell.c)) |
 | **Environment** | Up to **256** tracked `NAME=value` pairs in the shell copy of **`environ`** |
 | **Builtins** | **`cd`**, **`export`** / **`unset`** / **`env`**, **`jobs`** / **`fg`** / **`bg`**, **`exit`**, **`help`** |
