@@ -1,5 +1,5 @@
 /*
- * builtins/env.c — export / unset / env (echo — /bin/echo).
+ * builtins/env.c — export / unset / env (echo — /usr/bin/echo).
  */
 
 #include "builtin.h"

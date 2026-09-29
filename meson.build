@@ -8,7 +8,7 @@
 #
 # A PIE linked against CactLibc with /lib/ld.so as PT_INTERP, exactly as the
 # Makefile built it.  The integrator copies build-meson/cactsole into the image
-# (as /bin/cactsole and /bin/cactsole-rescue).
+# (as /usr/bin/cactsole and /usr/bin/cactsole-rescue).
 # ==============================================================================
 
 project('cactsole', 'c',

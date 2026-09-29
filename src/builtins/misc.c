@@ -119,7 +119,7 @@ static void prog_scan_dir(const char *dir, int dlen) {
 
 static void prog_collect(void) {
     const char *path = env_get("PATH");
-    if (!path) path = "/bin:/sbin:/usr/bin";
+    if (!path) path = "/usr/bin:/usr/sbin";
 
     const char *seg = path;
     while (*seg) {

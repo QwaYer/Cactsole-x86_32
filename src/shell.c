@@ -273,7 +273,7 @@ int shell_path_find(const char *cmd, char *out, int outsz) {
 
     {
         const char *path = env_get("PATH");
-        if (!path) path = "/bin:/sbin:/usr/bin";
+        if (!path) path = "/usr/bin:/usr/sbin";
         int cmdlen = strlen((char *)cmd);
         const char *seg = path;
         while (*seg) {
