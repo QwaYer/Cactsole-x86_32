@@ -35,7 +35,7 @@
 | Component | Role |
 |-----------|------|
 | **[CactLib-x86_32](https://github.com/QwaYer/CactLibc-x86_32)** | **`clibc.so`** + **`build-meson/start.o`** — syscalls, **`execve`**, **`tcgetattr`** for raw line input, etc. |
-| **[CactUserBins-x86_32](../CactUserBins-x86_32)** | **46** `/usr/bin` and `/usr/sbin` tools; the shell **`execve`**s them after **`PATH`** lookup |
+| **[CactUserBins-x86_32](../CactUserBins-x86_32)** | **84** `/usr/bin` and `/usr/sbin` tools; the shell **`execve`**s them after **`PATH`** lookup |
 | **[Cgoct-x86_32](../Cgoct-x86_32)** | Supervisor that respawns **`/usr/bin/cactsole`** (and optionally **`cactsole-rescue`** — same ELF, different staged path in **LocalRepoCactOS-x86_32**) |
 | **[LocalRepoCactOS-x86_32](../LocalRepoCactOS-x86_32)** | Stages **`cactsole`** into **`cctkfs`** as **`/usr/bin/cactsole`** |
 | **[CactOS-x86_32](https://github.com/QwaYer/CactOS-x86_32)** | **Integrator** — builds **CactLib**, then runs the **Meson**/**Ninja** build here, then **LocalRepo** / **kernel** / **ISO** |
