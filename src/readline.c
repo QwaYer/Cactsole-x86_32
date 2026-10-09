@@ -58,7 +58,9 @@ static void raw_mode_leave(void) {
 }
 
 void readline_init(void) {
-    raw_mode_enter();
+    /* Raw mode is entered per readline() call, not for the whole session: while
+       a foreground command runs the terminal must be back in its normal mode,
+       or the console cannot turn ^C into SIGINT (see readline() below). */
 }
 
 void readline_cleanup(void) {
@@ -147,7 +149,7 @@ void readline_add_history(const char *line) {
     hist_len++;
 }
 
-int readline(char *out, int max) {
+static int readline_raw(char *out, int max) {
     char buf[LINE_MAX];
     buf[0] = '\0';
     int  len = 0;
@@ -390,4 +392,17 @@ int readline(char *out, int max) {
     strncpy(out, buf, max - 1);
     out[max - 1] = '\0';
     return len;
+}
+
+/* Edit one line with the terminal in raw mode, then hand the terminal back
+ * exactly as it was.  The editor needs per-key input (ICANON off), but the
+ * shell must not keep raw mode while a foreground command runs: a child needs
+ * the terminal's normal canonical+ISIG settings, otherwise the console cannot
+ * turn ^C into SIGINT and Ctrl+C reaches the child as a raw 0x03 byte instead
+ * of stopping it. */
+int readline(char *out, int max) {
+    raw_mode_enter();
+    int r = readline_raw(out, max);
+    raw_mode_leave();
+    return r;
 }
