@@ -51,7 +51,6 @@ c_args = [
 cactsole_sources = []
 
 subdir('src')
-subdir('src/builtins')
 
 cactsole_lib = static_library('cactsole', cactsole_sources, c_args: c_args)
 

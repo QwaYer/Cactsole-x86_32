@@ -1,6 +1,5 @@
 #include "shell.h"
 #include "readline.h"
-#include "builtin.h"
 #include <unistd.h>
 #include <signal.h>
 #include <wait.h>
@@ -48,7 +47,8 @@ typedef struct {
 } Cmd;
 
 typedef struct {
-    pid_t pid;
+    pid_t pid;           /* representative process (the last member of a pipeline) */
+    pid_t pgid;          /* the job's process group: what the console hands ^C to */
     int   done;
     int   stopped;
     char  cmd[64];
@@ -57,6 +57,17 @@ typedef struct {
 static Job  jobs[MAX_JOBS];
 static int  njobs;
 static pid_t fg_pid = -1;
+static pid_t fg_pgid = -1;
+/* /dev/tty, held open so tcsetpgrp() has a console fd even with redirected stdio. */
+static int   console_fd = -1;
+
+/* Hand the console to `pgid`'s process group.  The line discipline then
+ * delivers ^C/^\ /^Z and SIGWINCH to every member of that group, which is the
+ * only way a signal reaches a whole pipeline; the shell takes the console back
+ * for itself (getpid()) whenever no foreground job is running. */
+static void console_set_fg(pid_t pgid) {
+    if (console_fd >= 0) (void)tcsetpgrp(console_fd, pgid);
+}
 
 static int is_space(char c) {
     return c == ' ' || c == '\t';
@@ -108,7 +119,9 @@ void env_set(const char *name, const char *val) {
     }
 }
 
-void env_unset(const char *name) {
+/* Remove NAME from the environment.  Only the control channel's `unsetenv`
+ * request calls this now — a child cannot change the shell's own environment. */
+static void env_unset(const char *name) {
     int i, j, nlen = strlen((char *)name);
     for (i = 0; i < env_cnt; i++) {
         if (starts_with_n(env_buf[i], name, nlen) && env_buf[i][nlen] == '=') {
@@ -144,6 +157,7 @@ static int job_add(pid_t pid, const char *cmd) {
     for (i = 0; i < MAX_JOBS; i++) {
         if (jobs[i].pid == 0) {
             jobs[i].pid  = pid;
+            jobs[i].pgid = pid;     /* a job starts out as its own group */
             jobs[i].done = 0;
             jobs[i].stopped = 0;
             if (cmd) {
@@ -161,12 +175,38 @@ static int job_add(pid_t pid, const char *cmd) {
 }
 
 /* Ctrl-Z (SIGSTOP from the console) turns the running foreground job into a
- * tracked stopped job, so jobs/fg/bg can find it again. */
+ * tracked stopped job. */
 static int job_mark_stopped(pid_t pid, const char *cmd) {
     int n = job_add(pid, cmd);
     if (n > 0)
         jobs[n - 1].stopped = 1;
     return n;
+}
+
+/* A pipeline's members share the group of its first command, which is not the
+ * pid the job is reported under (that is the last member, whose death means the
+ * job is done). */
+static void job_set_pgid(int n, pid_t pgid) {
+    if (n > 0 && n <= MAX_JOBS && jobs[n - 1].pid != 0) jobs[n - 1].pgid = pgid;
+}
+
+/* "cmd1 | cmd2 | ..." for the job table, so a job is named by what was typed
+ * rather than only the first word of a pipeline. */
+static void job_label(Cmd *cmds, int n, char *out, int outsz) {
+    int i, a, k = 0;
+    for (i = 0; i < n; i++) {
+        if (i > 0) {
+            if (k < outsz - 1) out[k++] = ' ';
+            if (k < outsz - 1) out[k++] = '|';
+            if (k < outsz - 1) out[k++] = ' ';
+        }
+        for (a = 0; a < cmds[i].argc; a++) {
+            const char *p;
+            if (a > 0 && k < outsz - 1) out[k++] = ' ';
+            for (p = cmds[i].argv[a]; *p && k < outsz - 1; p++) out[k++] = *p;
+        }
+    }
+    out[k] = '\0';
 }
 
 static void job_report_stopped(int n, const char *cmd) {
@@ -197,7 +237,11 @@ static void notify_done_jobs(void) {
     }
 }
 
-void shell_list_jobs(void) {
+/* ── job-table operations ────────────────────────────────────────────────────
+ * jobs/fg/bg are separate binaries now; they act on the shell's job table by
+ * sending a request through the control pipe (see ctl_apply). */
+
+static void shell_list_jobs(void) {
     int i;
     char num[16];
     for (i = 0; i < MAX_JOBS; i++) {
@@ -215,31 +259,40 @@ void shell_list_jobs(void) {
             }
             write(STDOUT_FILENO, jobs[i].cmd, strlen(jobs[i].cmd));
             write(STDOUT_FILENO, "\n", 1);
+
+            if (jobs[i].done) {
+                jobs[i].pid  = 0;
+                jobs[i].done = 0;
+                jobs[i].cmd[0] = '\0';
+            }
         }
     }
 }
 
-int shell_fg_job(int n) {
+static int shell_fg_job(int n) {
     if (n < 1 || n > MAX_JOBS || jobs[n-1].pid == 0) {
-        write(STDERR_FILENO, "cactsole: fg: no such job\n", 26);
+        write(STDERR_FILENO, "fg: no such job\n", 16);
         return 1;
     }
     if (jobs[n-1].done) {
-        write(STDERR_FILENO, "cactsole: fg: job already done\n", 31);
+        write(STDERR_FILENO, "fg: job already done\n", 21);
         jobs[n-1].pid = 0;
         return 0;
     }
     {
         pid_t pid = jobs[n-1].pid;
         int status;
-        /* A stopped job has to be resumed, or the wait below never returns. */
         if (jobs[n-1].stopped) {
-            kill(pid, (int)SIGCONT);
+            killpg(jobs[n-1].pgid, SIGCONT);
             jobs[n-1].stopped = 0;
         }
-        fg_pid = pid;
+        fg_pid  = pid;
+        fg_pgid = jobs[n-1].pgid;
+        console_set_fg(fg_pgid);
         waitpid(pid, &status, WUNTRACED);
-        fg_pid = -1;
+        console_set_fg(getpid());
+        fg_pid  = -1;
+        fg_pgid = -1;
 
         if (WIFSTOPPED(status)) {
             jobs[n-1].stopped = 1;
@@ -253,16 +306,31 @@ int shell_fg_job(int n) {
     }
 }
 
-int shell_bg_job(int n) {
+static int shell_bg_job(int n) {
     if (n < 1 || n > MAX_JOBS || jobs[n-1].pid == 0) {
-        write(STDERR_FILENO, "cactsole: bg: no such job\n", 26);
+        write(STDERR_FILENO, "bg: no such job\n", 16);
         return 1;
     }
-    kill(jobs[n-1].pid, (int)SIGCONT);
+    killpg(jobs[n-1].pgid, SIGCONT);
     jobs[n-1].stopped = 0;
     return 0;
 }
 
+/* Most recently created tracked job (0 when there is none) — `kill %`. */
+static int shell_current_job(void) {
+    int i;
+    for (i = MAX_JOBS - 1; i >= 0; i--)
+        if (jobs[i].pid != 0) return i + 1;
+    return 0;
+}
+
+/* Signal job n's whole process group (0 on success, 1 if there is no such job). */
+static int shell_signal_job(int n, int sig) {
+    if (n < 1 || n > MAX_JOBS || jobs[n-1].pid == 0) return 1;
+    if (killpg(jobs[n-1].pgid, sig) == 0) return 0;
+    if (kill(jobs[n-1].pid, sig) == 0) return 0;
+    return 1;
+}
 
 int shell_path_find(const char *cmd, char *out, int outsz) {
     const char *p = cmd;
@@ -475,7 +543,12 @@ static char *tokenise_cmd(char *s, Cmd *cmd, int *sep) {
 
 static void sigint_handler(int sig) {
     (void)sig;
-    if (fg_pid > 0)
+    /* The console usually delivers ^C straight to the foreground job's group,
+     * so this fires only while the shell itself owns the console.  Signal the
+     * whole job either way. */
+    if (fg_pgid > 0)
+        killpg(fg_pgid, SIGINT);
+    else if (fg_pid > 0)
         kill(fg_pid, (int)SIGINT);
 }
 
@@ -563,36 +636,6 @@ static void apply_redirections(Cmd *cmd) {
         dup2(STDERR_FILENO, STDOUT_FILENO);
 }
 
-static int normalize_exit(int st) {
-    if (st < 0) return 255;
-    if (st > 255) return 255;
-    return st;
-}
-
-/* If we got here, the image most likely has an outdated cactsole without builtins. */
-static int is_shell_reserved_name(const char *name) {
-    static const char *const only[] = {
-        "cd", "export", "unset", "env", "jobs", "fg", "bg", "exit", "help", NULL,
-    };
-    int i;
-    if (!name) return 0;
-    for (i = 0; only[i]; i++)
-        if (strcmp((char *)name, (char *)only[i]) == 0) return 1;
-    return 0;
-}
-
-static void warn_stale_shell(const char *name) {
-    static const char a[] = "cactsole: ";
-    static const char b[] =
-        ": shell built-in missing from this binary (wrong/stale cactsole in cctkfs?). ";
-    static const char c[] =
-        "Rebuild Cactsole-x86_32, run `make -C LocalRepoCactOS all`, update GRUB module.\n";
-    write(STDERR_FILENO, a, sizeof(a) - 1);
-    write(STDERR_FILENO, name, strlen(name));
-    write(STDERR_FILENO, b, sizeof(b) - 1);
-    write(STDERR_FILENO, c, sizeof(c) - 1);
-}
-
 static void exec_external(char **argv) {
     char path[512];
     shell_path_find(argv[0], path, sizeof(path));
@@ -603,40 +646,124 @@ static void exec_external(char **argv) {
     exit(127);
 }
 
+/* ── shell control channel ───────────────────────────────────────────────────
+ * A command that has to change the shell's own state — its working directory,
+ * its environment, its job table, its own existence — cannot do so from its
+ * own process: a child never affects its parent.  cactsole therefore hands
+ * every child the write end of a pipe in $CACT_CTL_FD, and after each
+ * foreground command drains that pipe and applies the requests.  The shell
+ * understands only these operations, never `cd`/`export`/... as commands, so
+ * moving them out to CactUserBins binaries does not bring builtins back.
+ *
+ * Request framing: one request per line ("\n"), fields separated by TAB:
+ *   cd\t<abs-path>          setenv\t<name>\t<value>      unsetenv\t<name>
+ *   jobs                    fg\t<n>                      bg\t<n>
+ *   kill\t<sig>\t<job>      exit\t<code> */
+#define CTL_BUF 2048
+
+static int  ctl_rfd = -1;
+static char ctl_buf[CTL_BUF];
+static int  ctl_len;
+
+static void ctl_apply(char *line) {
+    char *a = strchr(line, '\t');
+    char *b = a ? strchr(a + 1, '\t') : NULL;
+    if (a) *a = '\0';
+    if (b) *b = '\0';
+    const char *arg1 = a ? a + 1 : NULL;
+    const char *arg2 = b ? b + 1 : NULL;
+
+    if (strcmp(line, "cd") == 0 && arg1) {
+        if (chdir(arg1) != 0) {
+            write(STDERR_FILENO, "cd: ", 4);
+            write(STDERR_FILENO, arg1, strlen(arg1));
+            write(STDERR_FILENO, ": cannot change directory\n", 26);
+        }
+    } else if (strcmp(line, "setenv") == 0 && arg1) {
+        env_set(arg1, arg2 ? arg2 : "");
+    } else if (strcmp(line, "unsetenv") == 0 && arg1) {
+        env_unset(arg1);
+    } else if (strcmp(line, "jobs") == 0) {
+        shell_list_jobs();
+    } else if (strcmp(line, "fg") == 0) {
+        shell_fg_job(arg1 ? atoi(arg1) : 1);
+    } else if (strcmp(line, "bg") == 0) {
+        shell_bg_job(arg1 ? atoi(arg1) : 1);
+    } else if (strcmp(line, "kill") == 0 && arg1) {
+        int sig = atoi(arg1);
+        int n   = arg2 ? atoi(arg2) : 0;
+        if (n <= 0) n = shell_current_job();
+        if (n > 0) shell_signal_job(n, sig);
+    } else if (strcmp(line, "exit") == 0) {
+        readline_cleanup();
+        exit(arg1 ? atoi(arg1) : 0);
+    }
+}
+
+/* Read everything waiting on the control pipe and apply each complete request.
+ * A partial line (a write split across reads) stays buffered for the next
+ * flush; requests are short, so the pipe's PIPE_BUF write atomicity keeps a
+ * single request intact in practice. */
+static void ctl_flush(void) {
+    if (ctl_rfd < 0) return;
+
+    ssize_t n;
+    while (ctl_len < CTL_BUF - 1 &&
+           (n = read(ctl_rfd, ctl_buf + ctl_len,
+                     (size_t)(CTL_BUF - 1 - ctl_len))) > 0)
+        ctl_len += (int)n;
+
+    int start = 0;
+    for (int i = 0; i < ctl_len; i++) {
+        if (ctl_buf[i] == '\n') {
+            ctl_buf[i] = '\0';
+            ctl_apply(ctl_buf + start);
+            start = i + 1;
+        }
+    }
+    if (start > 0) {
+        memmove(ctl_buf, ctl_buf + start, (size_t)(ctl_len - start));
+        ctl_len -= start;
+    }
+    if (ctl_len >= CTL_BUF - 1) ctl_len = 0;   /* unterminated: drop it */
+}
+
+static void ctl_init(void) {
+    int fds[2];
+    if (pipe(fds) != 0) return;
+    ctl_rfd = fds[0];
+    /* Children keep the write end (fds[1]) — its number goes to $CACT_CTL_FD.
+     * The read end is the shell's alone: non-blocking so a drain never stops
+     * the prompt, and close-on-exec so it does not leak into children. */
+    int fl = fcntl(ctl_rfd, F_GETFL, 0);
+    if (fl >= 0) fcntl(ctl_rfd, F_SETFL, fl | O_NONBLOCK);
+    fcntl(ctl_rfd, F_SETFD, FD_CLOEXEC);
+
+    char num[16];
+    itoa(fds[1], num);
+    env_set("CACT_CTL_FD", num);
+}
+
 static void exec_pipeline(Cmd *cmds, int n, int bg) {
     int i;
     char jnum[16], jpid[16];
     if (n == 0) return;
 
-    if (n >= 2 && cmds[0].argc >= 1 && strcmp((char *)cmds[0].argv[0], "cd") == 0) {
-        int st = 0;
-        if (builtin_invoke(cmds[0].argv, cmds[0].argc, &st)) {
-            last_exit = normalize_exit(st);
-            exec_pipeline(cmds + 1, n - 1, bg);
-            return;
-        }
-    }
+    char jlabel[64];
+    job_label(cmds, n, jlabel, sizeof(jlabel));
 
     if (n == 1) {
-        int st;
-        if (builtin_invoke(cmds[0].argv, cmds[0].argc, &st)) {
-            last_exit = normalize_exit(st);
-            return;
-        }
-
-        if (cmds[0].argc > 0 && is_shell_reserved_name(cmds[0].argv[0])) {
-            warn_stale_shell(cmds[0].argv[0]);
-            last_exit = 127;
-            return;
-        }
-
         pid_t pid = fork();
         if (pid == 0) {
+            /* Its own process group: the console hands ^C to the foreground
+             * group, so a job must not share the shell's. */
+            setpgid(0, 0);
             apply_redirections(&cmds[0]);
             exec_external(cmds[0].argv);
         }
+        if (pid > 0) setpgid(pid, pid);   /* both sides, so the group exists */
         if (bg) {
-            int jn = job_add(pid, cmds[0].argv[0]);
+            int jn = job_add(pid, jlabel);
             write(STDOUT_FILENO, "[", 1);
             itoa(jn, jnum); write(STDOUT_FILENO, jnum, strlen(jnum));
             write(STDOUT_FILENO, "] ", 2);
@@ -644,18 +771,23 @@ static void exec_pipeline(Cmd *cmds, int n, int bg) {
             write(STDOUT_FILENO, "\n", 1);
             last_exit = 0;
         } else {
-            fg_pid = pid;
+            fg_pid  = pid;
+            fg_pgid = pid;
+            console_set_fg(pid);
             int status; waitpid(pid, &status, WUNTRACED);
-            fg_pid = -1;
+            console_set_fg(getpid());
+            fg_pid  = -1;
+            fg_pgid = -1;
             if (WIFSTOPPED(status)) {
-                /* Ctrl-Z parked it: keep it addressable for jobs/fg/bg. */
-                int jn = job_mark_stopped(pid, cmds[0].argv[0]);
-                if (jn > 0) job_report_stopped(jn, cmds[0].argv[0]);
+                /* Ctrl-Z parked it: announce the stop and track it. */
+                int jn = job_mark_stopped(pid, jlabel);
+                if (jn > 0) job_report_stopped(jn, jlabel);
                 last_exit = 128 + WSTOPSIG(status);
             } else {
                 last_exit = WEXITSTATUS(status);
             }
         }
+        ctl_flush();     /* a `cd`/`export`/`exit` request applies here */
         return;
     }
 
@@ -697,22 +829,18 @@ static void exec_pipeline(Cmd *cmds, int n, int bg) {
             if (i < n-1) dup2(pipes[i][1],   STDOUT_FILENO);
             for (j = 0; j < n-1; j++) { close(pipes[j][0]); close(pipes[j][1]); }
             apply_redirections(&cmds[i]);
-            {
-                int st;
-                if (builtin_invoke(cmds[i].argv, cmds[i].argc, &st))
-                    _exit(normalize_exit(st));
-                if (cmds[i].argc > 0 && is_shell_reserved_name(cmds[i].argv[0])) {
-                    warn_stale_shell(cmds[i].argv[0]);
-                    _exit(127);
-                }
-            }
             exec_external(cmds[i].argv);
         }
     }
+    /* One job, one process group, led by pids[0]: every member has to be in it
+     * because the console delivers ^C to the foreground *group* — that is what
+     * makes ^C stop a whole pipeline instead of one arbitrary member. */
+    for (i = 0; i < n; i++) if (pids[i] > 0) setpgid(pids[i], pids[0]);
     for (i = 0; i < n-1; i++) { close(pipes[i][0]); close(pipes[i][1]); }
 
     if (bg) {
-        int jn = job_add(pids[n-1], cmds[0].argv[0]);
+        int jn = job_add(pids[n-1], jlabel);
+        job_set_pgid(jn, pids[0]);
         write(STDOUT_FILENO, "[", 1);
         itoa(jn, jnum); write(STDOUT_FILENO, jnum, strlen(jnum));
         write(STDOUT_FILENO, "] ", 2);
@@ -720,20 +848,33 @@ static void exec_pipeline(Cmd *cmds, int n, int bg) {
         write(STDOUT_FILENO, "\n", 1);
         last_exit = 0;
     } else {
+        int stopped = 0, stop_sig = 0, last_status = 0;
+        fg_pgid = pids[0];
+        console_set_fg(fg_pgid);
+        /* WUNTRACED on every member, not just the one the job is reported
+         * under: ^Z stops the whole group, and the shell has to notice the stop
+         * wherever it lands — otherwise it waits forever for a member that will
+         * never run again, keeps the console pointed at the stopped group, and
+         * the console goes dead (^C included). */
         for (i = 0; i < n; i++) {
-            int status;
-            waitpid(pids[i], &status, (i == n - 1) ? WUNTRACED : 0);
-            if (i == n-1) {
-                if (WIFSTOPPED(status)) {
-                    int jn = job_mark_stopped(pids[n-1], cmds[0].argv[0]);
-                    if (jn > 0) job_report_stopped(jn, cmds[0].argv[0]);
-                    last_exit = 128 + WSTOPSIG(status);
-                } else {
-                    last_exit = WEXITSTATUS(status);
-                }
-            }
+            int status = 0;
+            waitpid(pids[i], &status, WUNTRACED);
+            if (WIFSTOPPED(status)) { stopped = 1; stop_sig = WSTOPSIG(status); }
+            if (i == n - 1) last_status = status;
+        }
+        console_set_fg(getpid());
+        fg_pgid = -1;
+        if (stopped) {
+            /* Ctrl-Z parked the job: announce the stop and track it. */
+            int jn = job_mark_stopped(pids[n-1], jlabel);
+            job_set_pgid(jn, pids[0]);
+            if (jn > 0) job_report_stopped(jn, jlabel);
+            last_exit = 128 + stop_sig;
+        } else {
+            last_exit = WEXITSTATUS(last_status);
         }
     }
+    ctl_flush();     /* a `cd`/`export`/`exit` request applies here */
 }
 
 static int is_assignment(const char *tok) {
@@ -794,6 +935,7 @@ static void run_line(char *line) {
 int shell_run_cmd(const char *cmd, char **envp) {
     if (!cmd) return 0;
     env_init(envp);
+    ctl_init();
     char line[LINE_MAX];
     int i = 0;
     while (cmd[i] && i < (int)sizeof(line) - 1) { line[i] = cmd[i]; i++; }
@@ -807,14 +949,24 @@ void shell_run(char **envp) {
     char cwd[256];
 
     env_init(envp);
+    ctl_init();
 
     signal(SIGINT,  sigint_handler);
     signal(SIGCHLD, sigchld_handler);
+
+    /* Own the console before reading anything: the shell becomes the session
+     * leader and claims the console's foreground group, so ^C reaches the job
+     * it hands the console to.  Without a claim there is no foreground group
+     * and the line discipline passes ^C through as a raw byte instead. */
+    setsid();
+    console_fd = open("/dev/tty", O_RDWR);
+    console_set_fg(getpid());
 
     readline_init();
 
     while (1) {
         notify_done_jobs();
+        ctl_flush();     /* requests left by background jobs, applied now */
 
         if (getcwd(cwd, sizeof(cwd)) == NULL) cwd[0] = '\0';
         {

@@ -10,8 +10,8 @@
 </p>
 
 <p align="center">
-  The interactive <strong>userspace shell</strong> for <strong>Cact OS</strong>: line editor with <strong>history</strong>, <strong>pipelines</strong>, <strong>redirections</strong>, <strong>job control</strong>, and a small set of <strong>builtins</strong>.<br>
-  Everything else (<strong><code>ls</code></strong>, <strong><code>cat</code></strong>, <strong><code>ping</code></strong>, …) is implemented as <strong>separate ELFs</strong> in <strong><a href="https://github.com/QwaYer/CactUserBins-x86_32">CactUserBins-x86_32</a></strong> on <strong><code>PATH</code></strong>.
+  The interactive <strong>userspace shell</strong> for <strong>Cact OS</strong>: line editor with <strong>history</strong>, <strong>pipelines</strong>, <strong>redirections</strong>, and <strong>job control</strong>.<br>
+  There are <strong>no builtins</strong>: every command is a <strong>separate ELF</strong> on <strong><code>PATH</code></strong> (<strong><a href="https://github.com/QwaYer/CactUserBins-x86_32">CactUserBins-x86_32</a></strong>), run with <strong><code>execve</code></strong>. Commands that must change the shell itself — <strong><code>cd</code></strong>, <strong><code>export</code></strong>, <strong><code>exit</code></strong>, <strong><code>jobs</code></strong>/<strong><code>fg</code></strong>/<strong><code>bg</code></strong> — do it through a <strong>control pipe</strong> the shell drains after each command.
 </p>
 
 ---
@@ -25,7 +25,7 @@
 | **Line / history** | Input up to **1024** chars; ring history **64** lines; blinking block caret ([`readline.c`](src/readline.c)) |
 | **Parser limits** | Up to **64** argv words, **8** pipeline stages, **16** background jobs ([`shell.c`](src/shell.c)) |
 | **Environment** | Up to **256** tracked `NAME=value` pairs in the shell copy of **`environ`** |
-| **Builtins** | **`cd`**, **`export`** / **`unset`** / **`env`**, **`jobs`** / **`fg`** / **`bg`**, **`exit`**, **`help`** |
+| **Commands** | **No builtins** — a command is looked up on **`PATH`**, **`execve`**'d, and may answer over the **control pipe** |
 | **Load address** | PIE **ET_DYN** at **`0x08000000`** ([`link.ld`](link.ld)); **`clibc.so`** at **`0x10000000`** (CactLib) |
 
 ---
@@ -72,28 +72,19 @@ Cactsole-x86_32/
 ├── LICENSE
 ├── VERSION
 ├── include/
-│   ├── shell.h           # env + job control + PATH lookup for builtins
+│   ├── shell.h           # env + job control + PATH lookup
 │   ├── readline.h
-│   ├── builtin.h
-│   ├── builtins.h        # nav/env/jobs/misc group runners + their tables
 │   └── version.h
 └── src/
     ├── main.c            # shell_run(envp)
-    ├── shell.c           # parser, pipelines, redirections, external exec
-    ├── readline.c        # raw TTY mode, history, basic line editing
-    ├── builtin.c         # dispatches builtin groups
-    └── builtins/
-        ├── nav.c         # cd
-        ├── env.c         # export, unset, env
-        ├── jobs.c        # jobs, fg, bg
-        └── misc.c        # exit, help (builtins + PATH listing)
+    ├── shell.c           # parser, pipelines, redirections, external exec, control channel
+    └── readline.c        # raw TTY mode, history, basic line editing
 ```
 
-Command descriptions live next to the commands. cactsole documents only the
-builtins it implements; `help` reads the program list from the `PATH`
-directories at run time, and `help <command>` **runs the program with
-`--help`** and lets it document itself. Nothing in this repo enumerates the
-**CactUserBins** tools or their options.
+Every word that is not a redirection, an operator or an assignment is a
+command: cactsole resolves it on **`PATH`** (`/usr/bin:/usr/sbin` by default)
+and **`execve`**s it as a child process. The shell keeps no catalogue of the
+**CactUserBins** tools — each program documents itself.
 
 ---
 
@@ -104,11 +95,40 @@ directories at run time, and `help <command>` **runs the program with
 | **Pipelines** | Stages separated by **`|`** (up to **`MAX_PIPELINE`**) |
 | **Lists** | **`;`** between commands; **`&&`** / **`||`** for conditional chains |
 | **Background** | Trailing **`&`** on a simple command or pipeline tail |
-| **Job control** | A foreground job stopped with **Ctrl-Z** / **`SIGSTOP`** stays tracked — **`jobs`** lists it as **`stopped`**, and **`fg`** / **`bg`** resume it with **`SIGCONT`** |
+| **Job control** | Each job runs in its own process group, so **Ctrl-C** reaches the whole pipeline; a **Ctrl-Z** stop is announced as **`Stopped`** and tracked — **`jobs`** / **`fg`** / **`bg`** are separate binaries again (see the control channel) |
 | **Redirections** | **`<`**, **`>`**, **`>>`**, **`2>`**, **`2>>`**, **`&>`** / **`&>>`**, **`2>&1`**, **`1>&2`** |
-| **`cd` + pipe** | If the line begins with **`cd DIR`** then a **`|`** pipeline, **`cd`** runs in the shell before the rest of the pipeline (see comments in [`shell.c`](src/shell.c)) |
 | **Signals** | **`SIGINT`** / **`SIGCHLD`** handlers integrate job notifications and **Ctrl+C** |
 | **Assignments** | A lone **`VAR=value`** line updates the shell environment |
+
+---
+
+## 🔌 Control channel
+
+A child process cannot change its parent, so a command that has to affect the
+*shell itself* — its working directory, environment, job table, or the shell's
+own existence — cannot work as a plain separate binary. cactsole therefore
+hands every child the write end of a pipe in **`$CACT_CTL_FD`**, and after each
+foreground command drains it and applies the requests. The shell still has **no
+builtins** — it understands only these operations, never command names:
+
+| Request | Fields (TAB-separated) | Effect |
+|---------|------------------------|--------|
+| **`cd`** | absolute path | `chdir`, so the *next* command in the line sees the new cwd |
+| **`setenv`** / **`unsetenv`** | name \[, value\] | update the shell environment (passed to later `execve`) |
+| **`exit`** | code | the shell exits with `code` |
+| **`jobs`** | — | print the job table |
+| **`fg`** / **`bg`** | job number | resume a stopped job in the foreground / background |
+| **`kill`** | signal, job number | signal a job's whole process group (`0` = current job) |
+
+The **CactUserBins** tools **`cd`**, **`export`**, **`unset`**, **`exit`**,
+**`jobs`**, **`fg`** and **`bg`** send these requests; **`kill`** uses the
+channel only for **`%JOB`** specs and signals a raw **`PID`** directly.
+**`help`** needs no channel — it just reads **`PATH`**.
+
+The read end is non-blocking (a drain never stalls the prompt) and
+close-on-exec, so only the write end reaches children. Requests are one
+`\n`-terminated line each; draining happens after every foreground command, so
+`cd DIR; ls` changes directory before `ls` runs.
 
 ---
 
@@ -120,8 +140,10 @@ After **cgoct** prints **`supervisor online`**, you should see the prompt:
 cact:/$
 ```
 
-Type **`help`** for the builtins cactsole implements plus every program it can
-see on **`PATH`**. **`help <command>`** prints a builtin's usage, or runs a
-separate program with **`--help`** so the program documents itself — every
-**CactUserBins** tool accepts **`--help`**. Typing **`exit`** returns control to
-**cgoct**, which may restart the shell according to **`/etc/cgoct.conf`**.
+Type any command on **`PATH`** — there are no builtins, so **`ls`**, **`cat`**,
+**`cd`**, **`help`**, **`exit`**, … are all resolved the same way. The
+state-changing ones (**`cd`**, **`export`**, **`exit`**, **`jobs`**, …) act
+through the control channel; the rest are ordinary programs. Every
+**CactUserBins** tool accepts **`--help`** and documents itself. **Ctrl-D** also
+ends the session, returning control to **cgoct**, which may restart the shell
+according to **`/etc/cgoct.conf`**.
