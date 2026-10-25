@@ -63,5 +63,5 @@ cactsole = custom_target('cactsole',
             start_o,
             '--whole-archive', cactsole_lib, '--no-whole-archive',
             clibc_so],
-  depend_files: files('link.ld'),
+  depend_files: files('link.ld') + [start_o, clibc_so],
   build_by_default: true)
